@@ -39,6 +39,8 @@ class RelationshipType(str, Enum):
     CORROBORATED = "corroborated"
     CONTRADICTED = "contradicted"
     CONTEXTUALIZED = "contextualized"
+    APPARENT_CONTRADICTION = "apparent_contradiction"
+    NOT_COMPARABLE = "not_comparable"
     UNRESOLVED = "unresolved"
 
 
@@ -193,8 +195,24 @@ class Observation(BaseModel):
 
 
 # -------------------------
-# Relationship
+# Relationship & Comparability
 # -------------------------
+
+class ComparabilitySignature(BaseModel):
+    entity_match: str         # "match", "mismatch"
+    concept_match: str        # "match", "related_sub_metric", "mismatch"
+    period_match: str         # "match", "nested", "different_aggregation", "different_period"
+    scope_match: str          # "match", "different_consolidation", "different_geography"
+    unit_match: str           # "match", "normalized_match", "incompatible"
+    status_relation: str      # "identical", "actual_vs_estimate", "actual_vs_forecast", "different"
+
+
+class NumericComparison(BaseModel):
+    value_a: Optional[float] = None
+    value_b: Optional[float] = None
+    difference: Optional[float] = None
+    relative_difference: Optional[float] = None
+
 
 class Relationship(BaseModel):
     id: str
@@ -211,6 +229,10 @@ class Relationship(BaseModel):
 
     # Machine-readable reasons
     reasons: List[str] = Field(default_factory=list)
+
+    # Structured reconciliation properties
+    comparability: Optional[ComparabilitySignature] = None
+    numeric: Optional[NumericComparison] = None
 
 
 # -------------------------

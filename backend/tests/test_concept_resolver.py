@@ -173,10 +173,24 @@ def test_reconciliation_matcher_concept_isolation():
         evidence=[],
     )
 
-    # Concepts should not match because IDs are different
+    # Concepts should not match identically because IDs are different (anti-conflation)
     assert concepts_match(obs_a, obs_b) is False
 
-    # Candidate matcher should flag concept mismatch
+    # Candidate matcher recognizes them as related sibling metrics (for APPARENT_CONTRADICTION)
     is_comparable, reason = CandidateMatcher.is_comparable_candidate(obs_a, obs_b)
-    assert is_comparable is False
-    assert reason == "concept_mismatch"
+    assert is_comparable is True
+    assert reason == "related_sibling_concept"
+
+    # Completely unrelated concept must be rejected as concept_mismatch
+    obs_unrelated = Observation(
+        id="obs_c",
+        entity=Entity(id="ent_01", canonical_name="delhivery limited"),
+        concept=Concept(id="cpt_pincodes", canonical_name="pin codes serviced"),
+        value=FactValue(type=ValueType.NUMBER, amount=18000.0, unit=None),
+        time=TimeContext(period_type=PeriodType.FISCAL_YEAR, label="FY2024"),
+        scope=Scope(),
+        evidence=[],
+    )
+    is_comp_unrelated, reason_unrelated = CandidateMatcher.is_comparable_candidate(obs_a, obs_unrelated)
+    assert is_comp_unrelated is False
+    assert reason_unrelated == "concept_mismatch"

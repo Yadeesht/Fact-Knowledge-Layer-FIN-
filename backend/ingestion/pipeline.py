@@ -151,12 +151,12 @@ def process_pdf_document(
 
                 if new_obs.id != existing_obs.id:
                     # Candidate Matcher Gate (Quarantine & Entity/Concept compatibility)
-                    is_cand, _ = CandidateMatcher.is_comparable_candidate(new_obs, existing_obs)
+                    is_cand, cand_type = CandidateMatcher.is_comparable_candidate(new_obs, existing_obs)
                     if not is_cand:
                         continue
 
                     # Deterministic Cascade
-                    rel = reconcile_deterministically(new_obs, existing_obs)
+                    rel = reconcile_deterministically(new_obs, existing_obs, candidate_type=cand_type)
                     if rel is None:
                         # Rate-limit pause before LLM reconciliation call (wakes up immediately if cancelled)
                         if sleep_or_cancel(1.5):

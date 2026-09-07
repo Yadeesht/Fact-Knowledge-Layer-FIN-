@@ -17,6 +17,8 @@ from backend.models.schema import (
     PeriodType,
     AssertionStatus,
     RelationshipType,
+    ComparabilitySignature,
+    NumericComparison,
 )
 
 
@@ -500,13 +502,15 @@ class Repository:
     # Relationship operations
     # -----------------------------
     def save_relationship(self, rel: Relationship) -> None:
+        comp_json = json.dumps(rel.comparability.model_dump()) if rel.comparability else None
+        num_json = json.dumps(rel.numeric.model_dump()) if rel.numeric else None
         with self.conn:
             self.conn.execute(
                 """
                 INSERT OR REPLACE INTO relationships (
                     id, observation_a, observation_b, relationship_type,
-                    confidence, explanation, reasons_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    confidence, explanation, reasons_json, comparability_json, numeric_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     rel.id,
@@ -516,6 +520,8 @@ class Repository:
                     rel.confidence,
                     rel.explanation,
                     json.dumps(rel.reasons),
+                    comp_json,
+                    num_json,
                 ),
             )
 
@@ -539,6 +545,12 @@ class Repository:
                 confidence=r["confidence"],
                 explanation=r["explanation"],
                 reasons=json.loads(r["reasons_json"]),
+                comparability=ComparabilitySignature(**json.loads(r["comparability_json"]))
+                if ("comparability_json" in r.keys() and r["comparability_json"])
+                else None,
+                numeric=NumericComparison(**json.loads(r["numeric_json"]))
+                if ("numeric_json" in r.keys() and r["numeric_json"])
+                else None,
             )
             for r in rows
         ]
@@ -551,6 +563,16 @@ class Repository:
 
         rel_dict = dict(r)
         rel_dict["reasons"] = json.loads(r["reasons_json"]) if r["reasons_json"] else []
+        rel_dict["comparability"] = (
+            json.loads(r["comparability_json"])
+            if ("comparability_json" in r.keys() and r["comparability_json"])
+            else None
+        )
+        rel_dict["numeric"] = (
+            json.loads(r["numeric_json"])
+            if ("numeric_json" in r.keys() and r["numeric_json"])
+            else None
+        )
 
         obs_a = self.get_observation(r["observation_a"])
         obs_b = self.get_observation(r["observation_b"])

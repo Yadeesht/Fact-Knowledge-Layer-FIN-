@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS relationships (
     confidence REAL NOT NULL,
     explanation TEXT NOT NULL,
     reasons_json TEXT NOT NULL,
+    comparability_json TEXT,
+    numeric_json TEXT,
     FOREIGN KEY(observation_a) REFERENCES observations(id),
     FOREIGN KEY(observation_b) REFERENCES observations(id)
 );
@@ -141,5 +143,13 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
             cursor.execute("ALTER TABLE concepts ADD COLUMN aliases_json TEXT")
         if "embedding_json" not in columns:
             cursor.execute("ALTER TABLE concepts ADD COLUMN embedding_json TEXT")
+
+        # Relationships comparability_json and numeric_json
+        cursor.execute("PRAGMA table_info(relationships)")
+        columns = [row["name"] for row in cursor.fetchall()]
+        if "comparability_json" not in columns:
+            cursor.execute("ALTER TABLE relationships ADD COLUMN comparability_json TEXT")
+        if "numeric_json" not in columns:
+            cursor.execute("ALTER TABLE relationships ADD COLUMN numeric_json TEXT")
 
     conn.close()

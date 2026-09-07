@@ -541,12 +541,12 @@ def run_reconciliation():
                 b = obs_list[j]
 
                 # Step 1: Candidate Matcher Gate (Quarantine & Comparability Check)
-                is_candidate, _ = CandidateMatcher.is_comparable_candidate(a, b)
+                is_candidate, cand_type = CandidateMatcher.is_comparable_candidate(a, b)
                 if not is_candidate:
                     continue
 
                 # Step 2: Deterministic Cascade
-                rel = reconcile_deterministically(a, b)
+                rel = reconcile_deterministically(a, b, candidate_type=cand_type)
                 if rel is None:
                     # Step 3: LLM Judge Fallback
                     rel = reconcile_with_llm(a, b)
