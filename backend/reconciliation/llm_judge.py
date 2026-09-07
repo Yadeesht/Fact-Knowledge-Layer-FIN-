@@ -10,23 +10,7 @@ from backend.models.schema import (
 )
 from backend.reconciliation.cascade import make_relationship_id
 from backend.core.llm_client import call_llm
-
-
-JUDGE_SYSTEM_PROMPT = """You are an expert financial and macroeconomic knowledge reconciliation judge.
-Given two atomic observations extracted from formal filings or institutional reports, determine their relationship:
-- corroborated: both sources substantiate the same fact with matching or equivalent semantics.
-- contradicted: both sources assert mutually incompatible facts under the exact same entity, concept, scope, and time.
-- contextualized: the difference is explained by differences in accounting methodology, segment breakdown, vintage, or definitions.
-- unresolved: there is insufficient evidence to determine if they corroborate or conflict.
-
-Return ONLY valid JSON matching this schema:
-{
-  "relationship_type": "corroborated" | "contradicted" | "contextualized" | "unresolved",
-  "confidence": float between 0.0 and 1.0,
-  "reasons": ["reason1", "reason2"],
-  "explanation": "Clear, concise, and objective financial explanation"
-}
-"""
+from backend.core.prompts import JUDGE_SYSTEM_PROMPT
 
 
 def format_observation_for_prompt(obs: Observation) -> str:

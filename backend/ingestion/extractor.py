@@ -19,45 +19,7 @@ from backend.core.normalizer import normalize_fact_value
 from backend.core.canonicalizer import canonicalize_entity_name, canonicalize_concept_name
 from backend.core.temporal import normalize_fiscal_year
 from backend.core.llm_client import call_llm
-
-
-EXTRACTION_SYSTEM_PROMPT = """You are an expert financial and macroeconomic analyst.
-Your task is to extract atomic, evidence-grounded claims (Observations) from financial and macroeconomic excerpts.
-
-For every extracted claim, you MUST provide:
-- entity_name: Canonical or formal reporting entity (e.g. 'Delhivery Limited', 'India', 'Reserve Bank of India')
-- entity_type: 'company', 'country', 'central_bank', or 'agency'
-- concept_name: Normalized metric name (e.g. 'Revenue from operations', 'Real GDP growth', 'Headline CPI inflation')
-- source_label: Original verbatim label used in the text
-- value_type: 'number', 'percentage', 'currency', or 'text'
-- value: Numeric amount (e.g. 8142.16, 6.4, 740) or textual fact
-- unit: Raw unit reported (e.g. 'INR crore', 'INR million', '%', 'million parcels')
-- period_label: Original timeframe expressed (e.g. 'FY24', 'H1 FY25', 'FY25')
-- period_type: 'fiscal_year', 'half_year', 'quarter', 'month', 'instant', or 'custom'
-- scope: {"geography": "India", "level": "company"|"economy", "consolidation": "consolidated"|"standalone"|"unknown"}
-- assertion_status: 'actual', 'estimate', 'forecast', 'projected', 'target', 'restated', or 'unknown'
-- evidence_quote: Exact supporting excerpt from the text (verbatim quote)
-- confidence: Float between 0.0 and 1.0 reflecting clarity of disclosure
-
-Return ONLY a JSON array of extracted observation objects:
-[
-  {
-    "entity_name": "...",
-    "entity_type": "...",
-    "concept_name": "...",
-    "source_label": "...",
-    "value_type": "currency",
-    "value": 8142.16,
-    "unit": "INR crore",
-    "period_label": "FY24",
-    "period_type": "fiscal_year",
-    "scope": {"geography": "India", "level": "company", "consolidation": "consolidated"},
-    "assertion_status": "actual",
-    "evidence_quote": "...",
-    "confidence": 0.98
-  }
-]
-"""
+from backend.core.prompts import EXTRACTION_SYSTEM_PROMPT, get_extraction_user_prompt
 
 
 def extract_observations_from_text(
@@ -70,7 +32,7 @@ def extract_observations_from_text(
     Executes live LLM extraction against text using Gemini/OpenAI if API credentials exist,
     falling back to standard pattern extraction when running offline.
     """
-    prompt = f"Document excerpt (Page {page_number}):\n\"\"\"\n{text}\n\"\"\"\n\nExtract all grounded atomic financial or macroeconomic observations."
+    prompt = get_extraction_user_prompt(text, page_number)
 
     observations: List[Observation] = []
     llm_output = call_llm(prompt, system_instruction=EXTRACTION_SYSTEM_PROMPT)

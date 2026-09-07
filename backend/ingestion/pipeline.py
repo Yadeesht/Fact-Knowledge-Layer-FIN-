@@ -81,7 +81,7 @@ def process_pdf_document(
         # Step 3 & 4: Extract and validate observations per chunk
         # Process first 10 most informative chunks for synchronous speed
         extracted_observations = []
-        chunks_to_process = chunks[:15] if len(chunks) > 15 else chunks
+        chunks_to_process = chunks  #while testing process less number to avoid wasting tokens
 
         for chk in chunks_to_process:
             obs_list = extract_observations_from_text(

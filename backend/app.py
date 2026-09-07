@@ -554,22 +554,17 @@ class ExtractTextRequest(BaseModel):
 @app.get("/api/llm/status")
 def get_llm_status():
     creds = get_llm_credentials()
-    if creds["gemini_key"]:
+    if creds.get("gemini_key"):
         masked = creds["gemini_key"][:4] + "..." + creds["gemini_key"][-4:] if len(creds["gemini_key"]) > 8 else "***"
-        return {"configured": True, "provider": "Google Gemini", "masked_key": masked}
-    elif creds["openai_key"]:
-        masked = creds["openai_key"][:4] + "..." + creds["openai_key"][-4:] if len(creds["openai_key"]) > 8 else "***"
-        return {"configured": True, "provider": "OpenAI", "masked_key": masked}
-    return {"configured": False, "provider": "none", "message": "No API key configured. Offline heuristic active."}
+        model = os.getenv("EXTRACTOR_MODEL", "gemini-1.5-flash")
+        return {"configured": True, "provider": "Google Gemini", "model": model, "masked_key": masked}
+    return {"configured": False, "provider": "none", "message": "No Gemini API key configured. Offline heuristic active."}
 
 
 @app.post("/api/llm/set-key")
 def set_api_key(req: LLMKeyRequest):
-    if req.provider.lower() == "gemini":
-        os.environ["GEMINI_API_KEY"] = req.api_key.strip()
-    else:
-        os.environ["OPENAI_API_KEY"] = req.api_key.strip()
-    return {"status": "success", "provider": req.provider}
+    os.environ["GEMINI_API_KEY"] = req.api_key.strip()
+    return {"status": "success", "provider": "gemini"}
 
 
 @app.post("/api/extract")
