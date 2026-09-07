@@ -59,7 +59,7 @@ async function initApp() {
     try {
       const cfg = await fetch(api("/api/config")).then(r => r.json());
       console.log("Connected to Knowledge Layer with config:", cfg);
-    } catch (e) {}
+    } catch (e) { }
   } else {
     updateApiStatus("offline", "Engine Offline");
   }
@@ -312,7 +312,16 @@ async function loadStarterFiles() {
 // -----------------------------------------------------------------
 // Processing Pipeline Stepper & Ingestion
 // -----------------------------------------------------------------
+let activeAbortController = null;
+let stepperTimers = [];
+
+function clearStepperTimers() {
+  stepperTimers.forEach(id => clearTimeout(id));
+  stepperTimers = [];
+}
+
 function showProcessingModal(filename) {
+  clearStepperTimers();
   const modal = document.getElementById("processingModal");
   const sub = document.getElementById("procModalFilename");
   if (sub) sub.innerText = filename;
@@ -323,8 +332,34 @@ function showProcessingModal(filename) {
 }
 
 function hideProcessingModal() {
+  clearStepperTimers();
   const modal = document.getElementById("processingModal");
   if (modal) modal.classList.remove("show");
+  activeAbortController = null;
+}
+
+async function cancelActiveProcessing() {
+  if (confirm("Are you sure you want to stop processing this filing?")) {
+    // 1. Immediately abort client fetch request
+    if (activeAbortController) {
+      activeAbortController.abort();
+      activeAbortController = null;
+    }
+
+    // 2. Clear all animation timers and dismiss modal immediately
+    hideProcessingModal();
+
+    // 3. Notify backend to abort pipeline loop asynchronously
+    try {
+      fetch(api("/api/cancel"), { method: "POST" }).catch(e => {
+        console.warn("Cancel request error:", e);
+      });
+    } catch (e) {
+      console.warn("Cancel request error:", e);
+    }
+
+    alert("Processing was cancelled by user.");
+  }
 }
 
 function resetStepper() {
@@ -365,13 +400,16 @@ async function handlePDFUpload(event) {
   const formData = new FormData();
   formData.append("file", file);
 
+  activeAbortController = new AbortController();
+
   try {
-    setTimeout(() => advanceStep(2), 700);
-    setTimeout(() => advanceStep(3), 1500);
+    stepperTimers.push(setTimeout(() => advanceStep(2), 700));
+    stepperTimers.push(setTimeout(() => advanceStep(3), 1500));
 
     const res = await fetch(api("/api/documents"), {
       method: "POST",
       body: formData,
+      signal: activeAbortController.signal,
     });
 
     if (!res.ok) {
@@ -380,14 +418,21 @@ async function handlePDFUpload(event) {
     }
 
     const data = await res.json();
+    if (data.status === "cancelled") {
+      hideProcessingModal();
+      return;
+    }
+
     advanceStep(4);
-    setTimeout(async () => {
+    stepperTimers.push(setTimeout(async () => {
       hideProcessingModal();
       await openDashboardWithFiling(data.document_id || "all");
-    }, 600);
+    }, 600));
   } catch (err) {
     hideProcessingModal();
-    alert("Ingestion error: " + err.message);
+    if (err.name !== "AbortError") {
+      alert("Ingestion error: " + err.message);
+    }
   } finally {
     event.target.value = "";
   }
@@ -397,14 +442,17 @@ async function ingestStarterFiling(filename) {
   showProcessingModal(filename);
   advanceStep(1);
 
+  activeAbortController = new AbortController();
+
   try {
-    setTimeout(() => advanceStep(2), 600);
-    setTimeout(() => advanceStep(3), 1300);
+    stepperTimers.push(setTimeout(() => advanceStep(2), 600));
+    stepperTimers.push(setTimeout(() => advanceStep(3), 1300));
 
     const res = await fetch(api("/api/ingest-starter"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filename }),
+      signal: activeAbortController.signal,
     });
 
     if (!res.ok) {
@@ -413,14 +461,21 @@ async function ingestStarterFiling(filename) {
     }
 
     const data = await res.json();
+    if (data.status === "cancelled") {
+      hideProcessingModal();
+      return;
+    }
+
     advanceStep(4);
-    setTimeout(async () => {
+    stepperTimers.push(setTimeout(async () => {
       hideProcessingModal();
       await openDashboardWithFiling(data.document_id || "all");
-    }, 600);
+    }, 600));
   } catch (err) {
     hideProcessingModal();
-    alert("Starter ingestion error: " + err.message);
+    if (err.name !== "AbortError") {
+      alert("Starter ingestion error: " + err.message);
+    }
   }
 }
 
@@ -796,8 +851,8 @@ function renderFacts(facts) {
 // -----------------------------------------------------------------
 async function loadObservations(docId = "all") {
   try {
-    const url = docId && docId !== "all" 
-      ? api(`/api/observations?document_id=${docId}`) 
+    const url = docId && docId !== "all"
+      ? api(`/api/observations?document_id=${docId}`)
       : api("/api/observations");
     const res = await fetch(url);
     allObservations = await res.json();
@@ -827,8 +882,8 @@ function renderObservations(items) {
       <div class="obs-box-header">
         <span class="obs-entity-title" style="font-size: 0.95rem;">${obs.entity.canonical_name}</span>
         ${obs.needs_review
-          ? `<span class="showcase-item-badge badge-review">Quarantine</span>`
-          : `<span class="showcase-item-badge badge-corroborated">${obs.assertion_status}</span>`}
+        ? `<span class="showcase-item-badge badge-review">Quarantine</span>`
+        : `<span class="showcase-item-badge badge-corroborated">${obs.assertion_status}</span>`}
       </div>
       <div class="obs-concept-sub">${obs.concept.canonical_name}</div>
       <div class="value-display">
@@ -836,8 +891,8 @@ function renderObservations(items) {
           ${obs.value.amount !== null && obs.value.amount !== undefined ? obs.value.amount : (obs.value.text || 'N/A')} ${obs.value.unit || ''}
         </span>
         ${obs.value.normalized_amount !== null && obs.value.normalized_amount !== undefined
-          ? `<span class="normalized-pill">Norm: ${obs.value.normalized_amount.toLocaleString()} ${obs.value.normalized_unit}</span>`
-          : ''}
+        ? `<span class="normalized-pill">Norm: ${obs.value.normalized_amount.toLocaleString()} ${obs.value.normalized_unit}</span>`
+        : ''}
       </div>
 
       <div style="font-size: 0.74rem; color: var(--text-tertiary); margin-bottom: 0.65rem;">
@@ -940,8 +995,8 @@ function renderNeedsReview(items) {
 // -----------------------------------------------------------------
 async function loadRelationships(docId = "all") {
   try {
-    const url = docId && docId !== "all" 
-      ? api(`/api/relationships?document_id=${docId}`) 
+    const url = docId && docId !== "all"
+      ? api(`/api/relationships?document_id=${docId}`)
       : api("/api/relationships");
     const res = await fetch(url);
     allRelationships = await res.json();

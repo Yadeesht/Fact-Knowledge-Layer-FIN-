@@ -5,12 +5,43 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from backend.db.repository import Repository
 from backend.ingestion.pdf_parser import PyMuPDFParser
-from backend.ingestion.extractor import extract_observations_from_text
+from backend.ingestion.extractor import extract_observations_from_batch
+from backend.ingestion.batcher import HierarchicalBatcher
 from backend.reconciliation.cascade import reconcile_deterministically
 from backend.reconciliation.llm_judge import reconcile_with_llm
 from backend.reconciliation.candidate_matcher import CandidateMatcher
 from backend.processed_manager import save_to_processed_folder
 
+
+
+import time
+import threading
+
+# Thread-safe cancellation control
+_CANCEL_EVENT = threading.Event()
+
+
+def request_pipeline_cancellation():
+    """Signals any running processing pipeline to abort immediately."""
+    _CANCEL_EVENT.set()
+    print("[Pipeline] Cancellation requested by user.")
+
+
+def reset_pipeline_cancellation():
+    """Resets the cancellation flag for future pipeline runs."""
+    _CANCEL_EVENT.clear()
+
+
+def is_cancellation_requested() -> bool:
+    return _CANCEL_EVENT.is_set()
+
+
+def sleep_or_cancel(seconds: float) -> bool:
+    """
+    Waits for specified duration, but returns True immediately if cancellation is requested.
+    Returns True if cancelled, False if sleep completed normally.
+    """
+    return _CANCEL_EVENT.wait(timeout=seconds)
 
 
 def process_pdf_document(
@@ -25,11 +56,12 @@ def process_pdf_document(
     1. Register document and start processing run
     2. Extract layout-aware chunks and store in `chunks` table
 
-    3. Extract observations per chunk
+    3. Extract observations per chunk (with 1.5s sleep and cancellation check)
     4. Validate and normalize into `Observation` + `Evidence`
-    5. Bucket and reconcile candidate pairs
+    5. Bucket and reconcile candidate pairs (with cancellation check)
     6. Complete processing run with metrics
     """
+    reset_pipeline_cancellation()
     close_repo = False
     if repo is None:
         repo = Repository()
@@ -65,6 +97,8 @@ def process_pdf_document(
             started_at=start_time,
         )
 
+        if is_cancellation_requested():
+            raise InterruptedError("Processing cancelled by user before chunking.")
 
         # Step 2: Extract and persist chunks
         chunks = parser.chunk_document(pdf_path, document_id=doc_id)
@@ -78,28 +112,43 @@ def process_pdf_document(
                 text=chk["text"],
             )
 
-        # Step 3 & 4: Extract and validate observations per chunk
-        # Process first 10 most informative chunks for synchronous speed
-        extracted_observations = []
-        chunks_to_process = chunks  #while testing process less number to avoid wasting tokens
+        # Step 3 & 4: Hierarchical Batching & Observation Extraction
+        batcher = HierarchicalBatcher()
+        batches = batcher.build_batches(chunks, document_id=doc_id)
+        print(f"[Pipeline] Partitioned {len(chunks)} atomic chunks into {len(batches)} hierarchical LLM batches.")
 
-        for chk in chunks_to_process:
-            obs_list = extract_observations_from_text(
-                text=chk["text"],
-                page_number=chk["page_number"],
-                document_id=doc_id,
-                chunk_id=chk["id"],
-            )
+        extracted_observations = []
+
+        for b_idx, batch in enumerate(batches):
+            # Check for mid-state cancellation
+            if is_cancellation_requested():
+                raise InterruptedError(f"Processing cancelled by user at batch {b_idx + 1}/{len(batches)}.")
+
+            obs_list = extract_observations_from_batch(batch, document_id=doc_id)
             for obs in obs_list:
                 repo.save_observation(obs, dataset=dataset)
                 extracted_observations.append(obs)
+
+            # Rate-limit pause between LLM batch calls (wakes up immediately if cancelled)
+            if b_idx < len(batches) - 1:
+                if sleep_or_cancel(1.5):
+                    raise InterruptedError(f"Processing cancelled by user after batch {b_idx + 1}/{len(batches)}.")
+
+        if is_cancellation_requested():
+            raise InterruptedError("Processing cancelled by user before reconciliation.")
 
         # Step 5: Candidate pairing & reconciliation
         all_obs = repo.list_observations()
         new_relationships = []
 
         for new_obs in extracted_observations:
+            if is_cancellation_requested():
+                raise InterruptedError("Processing cancelled by user during reconciliation.")
+
             for existing_obs in all_obs:
+                if is_cancellation_requested():
+                    raise InterruptedError("Processing cancelled by user during reconciliation.")
+
                 if new_obs.id != existing_obs.id:
                     # Candidate Matcher Gate (Quarantine & Entity/Concept compatibility)
                     is_cand, _ = CandidateMatcher.is_comparable_candidate(new_obs, existing_obs)
@@ -109,6 +158,9 @@ def process_pdf_document(
                     # Deterministic Cascade
                     rel = reconcile_deterministically(new_obs, existing_obs)
                     if rel is None:
+                        # Rate-limit pause before LLM reconciliation call (wakes up immediately if cancelled)
+                        if sleep_or_cancel(1.5):
+                            raise InterruptedError("Processing cancelled by user during reconciliation.")
                         rel = reconcile_with_llm(new_obs, existing_obs)
 
                     if rel:
@@ -120,6 +172,7 @@ def process_pdf_document(
         metrics = {
             "pdf_pages_parsed": page_count,
             "chunks_created": len(chunks),
+            "batches_processed": len(batches) if 'batches' in locals() else 0,
             "observations_extracted": len(extracted_observations),
             "observations_normalized": len(extracted_observations),
             "needs_review": sum(1 for o in extracted_observations if o.needs_review),
@@ -162,21 +215,42 @@ def process_pdf_document(
             "document_type": doc_type,
             "page_count": page_count,
             "chunks_stored": len(chunks),
+            "batches_processed": len(batches) if 'batches' in locals() else 0,
             "observations_extracted": len(extracted_observations),
             "relationships_generated": len(new_relationships),
             "processed_file": f"processed/{doc_id}.json",
         }
 
 
+    except InterruptedError as e:
+        print(f"[Pipeline] Pipeline interrupted: {e}")
+        if 'run_id' in locals() and 'doc_id' in locals():
+            try:
+                repo.rollback_document(doc_id)
+                print(f"[Pipeline] Rolled back partial records for document {doc_id}")
+            except Exception as rb_err:
+                print(f"[Pipeline] Rollback warning: {rb_err}")
+
+            repo.log_processing_run(
+                run_id=run_id,
+                document_id=doc_id,
+                status="cancelled",
+                extractor_model=model_name if 'model_name' in locals() else (extractor_model or "gemini-1.5-flash"),
+                metrics={},
+                started_at=start_time if 'start_time' in locals() else datetime.utcnow().isoformat(),
+                completed_at=datetime.utcnow().isoformat(),
+                error=str(e),
+            )
+        raise e
     except Exception as e:
         if 'run_id' in locals() and 'doc_id' in locals():
             repo.log_processing_run(
                 run_id=run_id,
                 document_id=doc_id,
                 status="failed",
-                extractor_model=extractor_model,
+                extractor_model=model_name if 'model_name' in locals() else (extractor_model or "gemini-1.5-flash"),
                 metrics={},
-                started_at=start_time,
+                started_at=start_time if 'start_time' in locals() else datetime.utcnow().isoformat(),
                 completed_at=datetime.utcnow().isoformat(),
                 error=str(e),
             )

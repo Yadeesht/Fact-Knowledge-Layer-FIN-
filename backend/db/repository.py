@@ -59,6 +59,34 @@ class Repository:
                 (doc_id, filename, dataset, document_type, page_count, now),
             )
 
+    def rollback_document(self, doc_id: str):
+        """
+        Rolls back any partial data saved for an aborted or cancelled document run.
+        Cleans up relationships, evidence, observations, chunks, and the document record.
+        """
+        with self.conn:
+            obs_rows = self.conn.execute(
+                "SELECT DISTINCT observation_id FROM evidence WHERE document_id = ?", (doc_id,)
+            ).fetchall()
+            obs_ids = [r["observation_id"] for r in obs_rows]
+
+            if obs_ids:
+                placeholders = ",".join("?" * len(obs_ids))
+                self.conn.execute(
+                    f"DELETE FROM relationships WHERE observation_a IN ({placeholders}) OR observation_b IN ({placeholders})",
+                    obs_ids + obs_ids,
+                )
+                self.conn.execute("DELETE FROM evidence WHERE document_id = ?", (doc_id,))
+                self.conn.execute(
+                    f"DELETE FROM observations WHERE id IN ({placeholders}) AND id NOT IN (SELECT observation_id FROM evidence)",
+                    obs_ids,
+                )
+            else:
+                self.conn.execute("DELETE FROM evidence WHERE document_id = ?", (doc_id,))
+
+            self.conn.execute("DELETE FROM chunks WHERE document_id = ?", (doc_id,))
+            self.conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+
     def list_documents(self) -> List[Dict[str, Any]]:
         cursor = self.conn.execute("SELECT * FROM documents ORDER BY created_at DESC, filename")
         results = []

@@ -22,7 +22,7 @@ from backend.reconciliation.cascade import reconcile_deterministically
 from backend.reconciliation.llm_judge import reconcile_with_llm
 from backend.reconciliation.candidate_matcher import CandidateMatcher
 from backend.ingestion.extractor import extract_observations_from_text
-from backend.ingestion.pipeline import process_pdf_document
+from backend.ingestion.pipeline import process_pdf_document, request_pipeline_cancellation
 from backend.core.llm_client import get_llm_credentials
 
 app = FastAPI(
@@ -93,9 +93,9 @@ def get_app_config():
 # -------------------------------------------------------------
 @app.post("/documents")
 @app.post("/api/documents")
-async def upload_document(file: UploadFile = File(...)):
+def upload_document(file: UploadFile = File(...)):
     """
-    POST /documents (§11): Upload a PDF, triggers synchronous ingestion.
+    POST /documents (§11): Upload a PDF, triggers synchronous ingestion in worker thread.
     """
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
@@ -108,6 +108,8 @@ async def upload_document(file: UploadFile = File(...)):
     try:
         result = process_pdf_document(pdf_path=saved_path, filename=file.filename, repo=repo)
         return result
+    except InterruptedError:
+        return {"status": "cancelled", "message": "Document processing was cancelled by user."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
     finally:
@@ -159,10 +161,21 @@ def ingest_starter_file(req: StarterIngestRequest):
     try:
         result = process_pdf_document(pdf_path=target_path, filename=req.filename, dataset=dataset, repo=repo)
         return result
+    except InterruptedError:
+        return {"status": "cancelled", "message": "Document processing was cancelled by user."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
     finally:
         repo.close()
+
+
+@app.post("/api/cancel")
+def cancel_processing_endpoint():
+    """
+    Aborts any active document ingestion / chunk extraction pipeline mid-state.
+    """
+    request_pipeline_cancellation()
+    return {"status": "cancelled", "message": "Pipeline cancellation requested."}
 
 
 @app.post("/api/clear")

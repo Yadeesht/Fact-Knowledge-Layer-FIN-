@@ -204,6 +204,7 @@ class ExtractedObservation(BaseModel):
     evidence_quote: str
     page_number: int
     section: Optional[str] = None
+    chunk_id: Optional[str] = None
 
     confidence: float = 0.95
 
