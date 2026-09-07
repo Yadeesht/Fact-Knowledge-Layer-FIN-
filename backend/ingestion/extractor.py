@@ -66,7 +66,13 @@ def extract_observations_from_batch(
     Unified extraction engine: extracts atomic observations from an LLM batch
     containing structured chunks (paragraphs, tables, narrative context).
     Grounds each observation to its specific originating chunk_id and page.
+    Requires an active online LLM API key (GEMINI_API_KEY or GOOGLE_API_KEY).
     """
+    from backend.core.llm_client import get_llm_credentials
+    creds = get_llm_credentials()
+    if not creds.get("gemini_key"):
+        raise RuntimeError("LLM API key is missing. Please add GEMINI_API_KEY (or GOOGLE_API_KEY) to your .env file to process documents.")
+
     from backend.ingestion.pipeline import is_cancellation_requested
     if is_cancellation_requested():
         raise InterruptedError("Extraction cancelled by user before batch LLM call.")
@@ -75,67 +81,56 @@ def extract_observations_from_batch(
     prompt = get_extraction_user_prompt(formatted_batch)
 
     llm_output = call_llm(prompt, system_instruction=EXTRACTION_SYSTEM_PROMPT)
-    print(llm_output)
     if is_cancellation_requested():
         raise InterruptedError("Extraction cancelled by user during batch LLM call.")
 
+    if not llm_output:
+        raise RuntimeError(f"LLM extraction failed for batch {batch.batch_id}. Please verify your API key, network connection, or quota limits.")
+
     observations: List[Observation] = []
-    if llm_output:
-        try:
-            clean_json = llm_output.strip()
-            if clean_json.startswith("```"):
-                clean_json = re.sub(r"^```(?:json)?\n?", "", clean_json)
-                clean_json = re.sub(r"\n?```$", "", clean_json)
+    clean_json = llm_output.strip()
+    if clean_json.startswith("```"):
+        clean_json = re.sub(r"^```(?:json)?\n?", "", clean_json)
+        clean_json = re.sub(r"\n?```$", "", clean_json)
 
-            data = json.loads(clean_json)
-            if isinstance(data, dict) and "observations" in data:
-                items = data["observations"]
-            elif isinstance(data, list):
-                items = data
-            else:
-                items = [data]
+    try:
+        data = json.loads(clean_json)
+    except Exception as e:
+        raise RuntimeError(f"Failed to parse LLM extraction response as valid JSON for batch {batch.batch_id}: {e}\nRaw output: {llm_output[:200]}")
 
-            for item in items:
-                # Resolve precise chunk_id and page_number
-                target_chunk_id, target_page, target_sec = resolve_chunk_for_observation(
-                    candidate_chunk_id=item.get("chunk_id"),
-                    candidate_page=item.get("page_number"),
-                    quote=item.get("evidence_quote", ""),
-                    batch_chunks=batch.chunks,
-                )
+    if isinstance(data, dict) and "observations" in data:
+        items = data["observations"]
+    elif isinstance(data, list):
+        items = data
+    else:
+        items = [data]
 
-                item["chunk_id"] = target_chunk_id
-                item["page_number"] = target_page
-                if target_sec and not item.get("section"):
-                    item["section"] = target_sec
-
-                candidate = ExtractedObservation(**item)
-
-                # ── Grounding validation gate ──
-                grounding_passed, grounding_reasons = validate_grounding(candidate)
-
-                obs = process_extracted_candidate(
-                    candidate,
-                    document_id=document_id,
-                    chunk_id=target_chunk_id,
-                    grounding_reasons=grounding_reasons,
-                )
-                observations.append(obs)
-
-            if observations:
-                return observations
-        except Exception as e:
-            print(f"[Batch LLM Extraction Warning]: {e}. Falling back to rule-assisted parser.")
-
-    # Offline / pattern extraction fallback across all chunks in the batch
-    for chk in batch.chunks:
-        chk_obs = _pattern_extract_fallback(
-            text=chk.get("text", ""),
-            page_number=chk.get("page_number", 1),
-            document_id=document_id,
-            chunk_id=chk.get("id"),
+    for item in items:
+        # Resolve precise chunk_id and page_number
+        target_chunk_id, target_page, target_sec = resolve_chunk_for_observation(
+            candidate_chunk_id=item.get("chunk_id"),
+            candidate_page=item.get("page_number"),
+            quote=item.get("evidence_quote", ""),
+            batch_chunks=batch.chunks,
         )
-        observations.extend(chk_obs)
+
+        item["chunk_id"] = target_chunk_id
+        item["page_number"] = target_page
+        if target_sec and not item.get("section"):
+            item["section"] = target_sec
+
+        candidate = ExtractedObservation(**item)
+
+        # ── Grounding validation gate ──
+        grounding_passed, grounding_reasons = validate_grounding(candidate)
+
+        obs = process_extracted_candidate(
+            candidate,
+            document_id=document_id,
+            chunk_id=target_chunk_id,
+            grounding_reasons=grounding_reasons,
+        )
+        observations.append(obs)
 
     return observations
 
@@ -169,190 +164,9 @@ def extract_observations_from_text(
     return extract_observations_from_batch(single_batch, document_id=document_id)
 
 
-def _pattern_extract_fallback(
-    text: str,
-    page_number: int,
-    document_id: str,
-    chunk_id: Optional[str] = None,
-) -> List[Observation]:
-    """
-    Heuristic rule-based extractor that runs if no LLM key is configured.
-    Extracts financial metrics, operational volumes, and macroeconomic figures
-    with evidence grounding from filing excerpts.
-    """
-    results: List[Observation] = []
-    lines_and_sentences = [s.strip() for s in re.split(r"(?:\n+|(?<=[.!?])\s+)", text) if len(s.strip()) > 15]
-
-    for s_clean in lines_and_sentences:
-        lower_s = s_clean.lower()
-
-        # 1. Entity detection
-        entity_name = "India"
-        entity_type = "country"
-        if "delhivery" in lower_s:
-            entity_name = "Delhivery Limited"
-            entity_type = "company"
-        elif "rbi" in lower_s or "reserve bank" in lower_s:
-            entity_name = "Reserve Bank of India"
-            entity_type = "central_bank"
-        elif "imf" in lower_s or "article iv" in lower_s:
-            entity_name = "International Monetary Fund"
-            entity_type = "agency"
-        elif any(w in lower_s for w in ["economic survey", "ministry of finance", "union budget", "government of india"]):
-            entity_name = "India"
-            entity_type = "country"
-
-        # 2. Scope & Status detection
-        scope_consol = "consolidated" if "consolidated" in lower_s else ("standalone" if "standalone" in lower_s else "consolidated")
-        scope_level = "company" if entity_type == "company" else "economy"
-
-        status = AssertionStatus.ACTUAL
-        if any(w in lower_s for w in ["forecast", "project", "projected", "projection"]):
-            status = AssertionStatus.FORECAST
-        elif any(w in lower_s for w in ["estimate", "estimated", "advance estimate", "provisional"]):
-            status = AssertionStatus.ESTIMATE
-        elif any(w in lower_s for w in ["target", "budgeted"]):
-            status = AssertionStatus.TARGET
-
-        # 3. Fiscal year / Period detection
-        period_label = None
-        period_type = PeriodType.FISCAL_YEAR
-        fy_m = re.search(r"(?:(?:FY|20)\s?(\d{2,4})|20(\d{2})[-–/](\d{2}))", s_clean, re.I)
-        if fy_m:
-            if fy_m.group(1):
-                raw_yr = fy_m.group(1)
-                period_label = f"FY{raw_yr[-2:]}"
-            elif fy_m.group(2) and fy_m.group(3):
-                period_label = f"FY{fy_m.group(3)}"
-        elif "h1" in lower_s:
-            period_label = "H1 FY25"
-            period_type = PeriodType.HALF_YEAR
-        elif "q4" in lower_s:
-            period_label = "Q4 FY24"
-            period_type = PeriodType.QUARTER
-
-        # 4. Financial Currency Metrics (e.g. Revenue, EBITDA, Net Profit/Loss)
-        curr_pattern = re.search(
-            r"(?:revenue|ebitda|profit|loss|turnover|pat|income).*?(?:₹|rs\.?|inr)?\s*([\d,]+(?:\.\d+)?)\s*(crore|cr|million|mn|lakh|bn|billion)?",
-            s_clean,
-            re.I,
-        )
-        if curr_pattern:
-            raw_num_str = curr_pattern.group(1).replace(",", "")
-            raw_unit = curr_pattern.group(2) or "crore"
-            raw_unit_norm = raw_unit.lower()
-            if raw_unit_norm in ["cr", "crore", "crores"]:
-                unit_label = "INR crore"
-            elif raw_unit_norm in ["mn", "million"]:
-                unit_label = "INR million"
-            elif raw_unit_norm in ["lakh", "lakhs"]:
-                unit_label = "INR lakh"
-            else:
-                unit_label = "INR"
-
-            concept_name = "revenue from operations"
-            if "ebitda" in lower_s:
-                concept_name = "adjusted ebitda"
-            elif "loss" in lower_s or "profit" in lower_s or "pat" in lower_s:
-                concept_name = "net profit after tax"
-
-            try:
-                num_val = float(raw_num_str)
-                if num_val > 0:
-                    candidate = ExtractedObservation(
-                        entity_name=entity_name,
-                        entity_type=entity_type,
-                        concept_name=concept_name,
-                        source_label=concept_name,
-                        value_type=ValueType.CURRENCY,
-                        value=num_val,
-                        unit=unit_label,
-                        period_label=period_label or ("FY24" if entity_type == "company" else "FY25"),
-                        period_type=period_type,
-                        scope=Scope(geography="India", level=scope_level, consolidation=scope_consol),
-                        assertion_status=status,
-                        evidence_quote=s_clean[:280],
-                        page_number=page_number,
-                        confidence=0.92,
-                    )
-                    results.append(process_extracted_candidate(candidate, document_id, chunk_id))
-            except ValueError:
-                pass
-
-        # 5. Percentage Metrics (GDP, Inflation, Deficit, Margins)
-        pct_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:%|per\s*cent)", s_clean, re.I)
-        if pct_match:
-            try:
-                pct_val = float(pct_match.group(1))
-                if 0.1 <= pct_val <= 100.0:
-                    concept_name = None
-                    if any(k in lower_s for k in ["gdp", "growth", "gross domestic product"]):
-                        concept_name = "real gdp growth"
-                    elif any(k in lower_s for k in ["inflation", "cpi", "consumer price"]):
-                        concept_name = "headline cpi inflation"
-                    elif any(k in lower_s for k in ["fiscal deficit", "deficit"]):
-                        concept_name = "gross fiscal deficit"
-                    elif any(k in lower_s for k in ["margin", "ebitda margin"]):
-                        concept_name = "ebitda margin"
-
-                    if concept_name:
-                        candidate = ExtractedObservation(
-                            entity_name=entity_name,
-                            entity_type=entity_type,
-                            concept_name=concept_name,
-                            source_label=concept_name,
-                            value_type=ValueType.PERCENTAGE,
-                            value=pct_val,
-                            unit="%",
-                            period_label=period_label or "FY25",
-                            period_type=period_type,
-                            scope=Scope(geography="India", level=scope_level, consolidation=scope_consol),
-                            assertion_status=status,
-                            evidence_quote=s_clean[:280],
-                            page_number=page_number,
-                            confidence=0.90,
-                        )
-                        results.append(process_extracted_candidate(candidate, document_id, chunk_id))
-            except ValueError:
-                pass
-
-        # 6. Volumes & Operational Metrics (Express Parcels, Pincodes)
-        vol_match = re.search(
-            r"([\d,]+(?:\.\d+)?)\s*(million|mn|lakh|thousand)?\s*(parcels|shipments|express parcels|pincodes|serviceable pincodes|centers)",
-            s_clean,
-            re.I,
-        )
-        if vol_match:
-            try:
-                raw_vol = float(vol_match.group(1).replace(",", ""))
-                multiplier = vol_match.group(2)
-                item_name = vol_match.group(3).lower()
-
-                concept_name = "express parcel volume" if ("parcel" in item_name or "shipment" in item_name) else "serviceable pincodes"
-                unit_label = f"{multiplier or ''} {item_name}".strip()
-
-                # Missing timeframe triggers anomaly escalation (Case 4)
-                candidate = ExtractedObservation(
-                    entity_name=entity_name,
-                    entity_type=entity_type,
-                    concept_name=concept_name,
-                    source_label=concept_name,
-                    value_type=ValueType.NUMBER,
-                    value=raw_vol,
-                    unit=unit_label,
-                    period_label=period_label,  # None triggers needs_review policy
-                    period_type=period_type if period_label else PeriodType.CUSTOM,
-                    scope=Scope(geography="India", level=scope_level, consolidation=scope_consol),
-                    assertion_status=status,
-                    evidence_quote=s_clean[:280],
-                    page_number=page_number,
-                    confidence=0.60 if not period_label else 0.88,
-                )
-                results.append(process_extracted_candidate(candidate, document_id, chunk_id))
-            except ValueError:
-                pass
-
-    return results
+def _pattern_extract_fallback(*args, **kwargs) -> List[Observation]:
+    """Deprecated: The system requires an active LLM key and does not use heuristic regex fallback."""
+    raise RuntimeError("Offline pattern extraction has been disabled. Please configure GEMINI_API_KEY in .env.")
 
 
 
