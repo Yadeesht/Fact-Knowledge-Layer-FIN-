@@ -16,7 +16,7 @@ from backend.models.schema import (
     RelationshipType,
     ExtractedObservation,
 )
-from backend.seed_data import populate_seed_data
+from backend.processed_manager import load_all_processed_into_db, PROCESSED_DIR, ensure_processed_dir
 from backend.reconciliation.cascade import reconcile_deterministically
 from backend.reconciliation.llm_judge import reconcile_with_llm
 from backend.reconciliation.candidate_matcher import CandidateMatcher
@@ -42,17 +42,17 @@ app.add_middleware(
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 UPLOADS_DIR = Path(__file__).resolve().parent.parent / "data" / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+ensure_processed_dir()
 
 
 @app.on_event("startup")
 def startup_event():
-    # Initialize SQLite database and populate starter datasets if empty
+    # Initialize SQLite database and load processed records from processed/ directory if available
     init_db()
     repo = Repository()
     try:
-        docs = repo.list_documents()
-        if not docs:
-            populate_seed_data(repo)
+        loaded = load_all_processed_into_db(repo)
+        print(f"Loaded {loaded} processed document artifact(s) from processed/ directory.")
     finally:
         repo.close()
 
@@ -258,60 +258,98 @@ def get_showcase_cases():
 
         case4 = repo.get_observation("obs_del_pincodes_ambiguous")
 
-        cases = [
-            {
-                "case_id": "case_1_corroborated",
-                "title": "Case 1: Corroboration Across Financial Reporting Formats",
-                "badge": "CORROBORATED",
-                "category": "corroborated",
-                "takeaway": "Automatic unit normalization bridges ₹8,142.16 Crore and ₹81,424 Million seamlessly within 0.1% materiality.",
-                "observation_a": case1_a.dict() if case1_a else None,
-                "observation_b": case1_b.dict() if case1_b else None,
-                "relationship": (
-                    reconcile_deterministically(case1_a, case1_b).dict()
-                    if case1_a and case1_b
-                    else None
-                ),
-            },
-            {
-                "case_id": "case_2_contradicted",
-                "title": "Case 2: Genuine Contradiction on Matching Vintage",
-                "badge": "CONTRADICTED",
-                "category": "contradicted",
-                "takeaway": "System flags material 12.5% divergence on matching entity, concept, period, scope, and actual assertion status.",
-                "observation_a": case2_a.dict() if case2_a else None,
-                "observation_b": case2_b.dict() if case2_b else None,
-                "relationship": (
-                    reconcile_deterministically(case2_a, case2_b).dict()
-                    if case2_a and case2_b
-                    else None
-                ),
-            },
-            {
-                "case_id": "case_3_contextualized",
-                "title": "Case 3: Contextualized Reconcile (Estimate vs Projection)",
-                "badge": "CONTEXTUALIZED",
-                "category": "contextualized",
-                "takeaway": "System understands assertion status: an Economic Survey estimate (6.4%) and an IMF projection (6.5%) contextualize rather than contradict.",
-                "observation_a": case3_a.dict() if case3_a else None,
-                "observation_b": case3_b.dict() if case3_b else None,
-                "relationship": (
-                    reconcile_deterministically(case3_a, case3_b).dict()
-                    if case3_a and case3_b
-                    else None
-                ),
-            },
-            {
-                "case_id": "case_4_review",
-                "title": "Case 4: Extraction Anomaly & Human Review Escalation",
+        if case1_a and case1_b:
+            cases = [
+                {
+                    "case_id": "case_1_corroborated",
+                    "title": "Case 1: Corroboration Across Financial Reporting Formats",
+                    "badge": "CORROBORATED",
+                    "category": "corroborated",
+                    "takeaway": "Automatic unit normalization bridges ₹8,142.16 Crore and ₹81,424 Million seamlessly within 0.1% materiality.",
+                    "observation_a": case1_a.dict(),
+                    "observation_b": case1_b.dict(),
+                    "relationship": (
+                        reconcile_deterministically(case1_a, case1_b).dict()
+                        if case1_a and case1_b
+                        else None
+                    ),
+                },
+                {
+                    "case_id": "case_2_contradicted",
+                    "title": "Case 2: Genuine Contradiction on Matching Vintage",
+                    "badge": "CONTRADICTED",
+                    "category": "contradicted",
+                    "takeaway": "System flags material divergence on matching entity, concept, period, scope, and actual assertion status.",
+                    "observation_a": case2_a.dict() if case2_a else None,
+                    "observation_b": case2_b.dict() if case2_b else None,
+                    "relationship": (
+                        reconcile_deterministically(case2_a, case2_b).dict()
+                        if case2_a and case2_b
+                        else None
+                    ),
+                },
+                {
+                    "case_id": "case_3_contextualized",
+                    "title": "Case 3: Contextualized Reconcile (Estimate vs Projection)",
+                    "badge": "CONTEXTUALIZED",
+                    "category": "contextualized",
+                    "takeaway": "System understands assertion status: an Economic Survey estimate and an IMF projection contextualize rather than contradict.",
+                    "observation_a": case3_a.dict() if case3_a else None,
+                    "observation_b": case3_b.dict() if case3_b else None,
+                    "relationship": (
+                        reconcile_deterministically(case3_a, case3_b).dict()
+                        if case3_a and case3_b
+                        else None
+                    ),
+                },
+                {
+                    "case_id": "case_4_review",
+                    "title": "Case 4: Extraction Anomaly & Human Review Escalation",
+                    "badge": "NEEDS REVIEW",
+                    "category": "needs_review",
+                    "takeaway": "System refuses to fabricate missing temporal anchors or units, safely flagging claims for human verification.",
+                    "observation": case4.dict() if case4 else None,
+                    "review_reason": case4.review_reason if case4 else "Missing temporal anchor",
+                },
+            ]
+            return [c for c in cases if c.get("observation_a") or c.get("observation")]
+
+        # Dynamic showcase built from processed files in database
+        rels = repo.list_relationships()
+        all_obs = {o.id: o for o in repo.list_observations()}
+        dynamic_cases = []
+
+        for rel in rels:
+            obs_a = all_obs.get(rel.observation_a)
+            obs_b = all_obs.get(rel.observation_b)
+            if not obs_a or not obs_b:
+                continue
+
+            rel_type = rel.relationship_type.value if hasattr(rel.relationship_type, "value") else str(rel.relationship_type)
+            dynamic_cases.append({
+                "case_id": f"case_{rel.id}",
+                "title": f"Reconciliation ({rel_type.title()}): {obs_a.entity.canonical_name} - {obs_a.concept.canonical_name}",
+                "badge": rel_type.upper(),
+                "category": rel_type.lower(),
+                "takeaway": rel.explanation,
+                "observation_a": obs_a.dict(),
+                "observation_b": obs_b.dict(),
+                "relationship": rel.dict(),
+            })
+
+        review_obs = [o for o in all_obs.values() if o.needs_review]
+        for obs in review_obs:
+            dynamic_cases.append({
+                "case_id": f"review_{obs.id}",
+                "title": f"Anomaly Escalation: {obs.entity.canonical_name} - {obs.concept.canonical_name}",
                 "badge": "NEEDS REVIEW",
                 "category": "needs_review",
-                "takeaway": "System refuses to fabricate missing temporal anchors or units, safely flagging claims for human verification.",
-                "observation": case4.dict() if case4 else None,
-                "review_reason": case4.review_reason if case4 else None,
-            },
-        ]
-        return cases
+                "takeaway": "Extraction quarantined due to missing or ambiguous attributes.",
+                "observation": obs.dict(),
+                "review_reason": obs.review_reason or "Ambiguous attributes",
+            })
+
+        return dynamic_cases
     finally:
         repo.close()
 

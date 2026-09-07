@@ -76,6 +76,15 @@ function renderShowcaseSelectors() {
   const container = document.getElementById("showcaseSelectorGrid");
   container.innerHTML = "";
 
+  if (!showcaseData || showcaseData.length === 0) {
+    container.innerHTML = `
+      <div style="grid-column: 1 / -1; background: var(--bg-card); padding: 1rem 1.5rem; border-radius: 8px; border: 1px dashed var(--border-color); color: var(--text-muted); font-size: 0.88rem; text-align: center;">
+        📁 No processed document artifacts found in <code>processed/</code> folder.
+      </div>
+    `;
+    return;
+  }
+
   showcaseData.forEach((item, idx) => {
     const card = document.createElement("div");
     card.className = `showcase-card ${idx === activeCaseIndex ? "active" : ""}`;
@@ -98,7 +107,21 @@ function renderShowcaseSelectors() {
 function renderActiveShowcase(idx) {
   const container = document.getElementById("showcaseInspector");
   const item = showcaseData[idx];
-  if (!item) return;
+
+  if (!item || showcaseData.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 3.5rem 1.5rem; background: var(--bg-card); border-radius: 12px; border: 1px dashed var(--border-color);">
+        <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">📂</div>
+        <h3 style="margin-bottom: 0.5rem; color: var(--text-main); font-weight: 700;">Nothing Processed Yet</h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem; max-width: 520px; margin: 0 auto 1.5rem; line-height: 1.6;">
+          Seed data has been removed. No processed document artifacts currently exist in the <code>processed/</code> folder. Upload a PDF using the ingestion button above or place a processed <code>.json</code> file into <code>processed/</code> to view demo findings.
+        </p>
+        <button class="btn btn-primary" onclick="document.getElementById('pdfFileInput').click()">⚡ Upload & Ingest PDF Document</button>
+      </div>
+    `;
+    return;
+  }
+
 
   if (item.category === "needs_review") {
     // Single observation anomaly
@@ -367,6 +390,18 @@ function renderObservations(items) {
   const container = document.getElementById("observationsGrid");
   container.innerHTML = "";
 
+  if (!items || items.length === 0) {
+    container.innerHTML = `
+      <div style="grid-column: 1 / -1; text-align: center; padding: 3rem 1.5rem; background: var(--bg-card); border-radius: 12px; border: 1px dashed var(--border-color);">
+        <h3 style="margin-bottom: 0.5rem; color: var(--text-main);">Nothing Processed Yet</h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem; max-width: 500px; margin: 0 auto;">
+          No atomic observations extracted yet. Ingest a PDF document or place a processed artifact into <code>processed/</code>.
+        </p>
+      </div>
+    `;
+    return;
+  }
+
   items.forEach(obs => {
     const card = document.createElement("div");
     card.className = `obs-card ${obs.needs_review ? 'needs-review' : ''}`;
@@ -452,6 +487,19 @@ function renderDocuments(docs) {
   const container = document.getElementById("documentsGrid");
   if (!container) return;
   container.innerHTML = "";
+
+  if (!docs || docs.length === 0) {
+    container.innerHTML = `
+      <div style="grid-column: 1 / -1; text-align: center; padding: 3rem 1.5rem; background: var(--bg-card); border-radius: 12px; border: 1px dashed var(--border-color);">
+        <h3 style="margin-bottom: 0.5rem; color: var(--text-main);">Nothing Processed Yet</h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem; max-width: 500px; margin: 0 auto;">
+          No PDF documents exist in the knowledge layer or <code>processed/</code> directory.
+        </p>
+      </div>
+    `;
+    return;
+  }
+
 
   docs.forEach(d => {
     const card = document.createElement("div");

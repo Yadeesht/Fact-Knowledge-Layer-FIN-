@@ -8,6 +8,8 @@ from backend.ingestion.extractor import extract_observations_from_text
 from backend.reconciliation.cascade import reconcile_deterministically
 from backend.reconciliation.llm_judge import reconcile_with_llm
 from backend.reconciliation.candidate_matcher import CandidateMatcher
+from backend.processed_manager import save_to_processed_folder
+
 
 
 def process_pdf_document(
@@ -109,7 +111,7 @@ def process_pdf_document(
                         repo.save_relationship(rel)
                         new_relationships.append(rel)
 
-        # Step 6: Complete run
+        # Step 6: Complete run and save processed JSON artifact to processed/ folder
         completed_time = datetime.utcnow().isoformat()
         metrics = {
             "pdf_pages_parsed": page_count,
@@ -119,6 +121,23 @@ def process_pdf_document(
             "needs_review": sum(1 for o in extracted_observations if o.needs_review),
             "relationships_generated": len(new_relationships),
         }
+
+        doc_meta = {
+            "id": doc_id,
+            "filename": fname,
+            "dataset": dataset,
+            "document_type": doc_type,
+            "page_count": page_count,
+            "created_at": start_time,
+        }
+        
+        save_to_processed_folder(
+            doc_id=doc_id,
+            doc_meta=doc_meta,
+            chunks=chunks,
+            observations=extracted_observations,
+            relationships=new_relationships,
+        )
 
         repo.log_processing_run(
             run_id=run_id,
@@ -140,7 +159,9 @@ def process_pdf_document(
             "chunks_stored": len(chunks),
             "observations_extracted": len(extracted_observations),
             "relationships_generated": len(new_relationships),
+            "processed_file": f"processed/{doc_id}.json",
         }
+
 
     except Exception as e:
         if 'run_id' in locals() and 'doc_id' in locals():

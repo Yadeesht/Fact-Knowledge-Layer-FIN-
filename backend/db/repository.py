@@ -26,6 +26,18 @@ class Repository:
     def close(self):
         self.conn.close()
 
+    def clear_all_data(self):
+        with self.conn:
+            self.conn.execute("DELETE FROM relationships")
+            self.conn.execute("DELETE FROM evidence")
+            self.conn.execute("DELETE FROM observations")
+            self.conn.execute("DELETE FROM concepts")
+            self.conn.execute("DELETE FROM entities")
+            self.conn.execute("DELETE FROM chunks")
+            self.conn.execute("DELETE FROM processing_runs")
+            self.conn.execute("DELETE FROM documents")
+
+
     # -----------------------------
     # Document operations
     # -----------------------------
