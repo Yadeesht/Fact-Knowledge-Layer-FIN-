@@ -8,17 +8,31 @@ def normalize_fiscal_year(label: str) -> str:
     """
     Normalizes fiscal year variants:
     e.g. 'FY 2024', 'FY24', '2023-24', 'FY 23-24' -> 'FY24'
+    Preserves trailing qualifiers like '(up to February 2025)' or 'as of March 2025'.
     """
-    cleaned = label.lower().strip()
-    match_fy_4 = re.search(r"fy\s*(20)?(\d{2})", cleaned)
+    if not label:
+        return label
+
+    raw = label.strip()
+
+    # Look for parenthetical or qualifying suffix text: e.g. "(up to February 2025)", "as on March 31"
+    qualifier = ""
+    q_match = re.search(r"(\(.*?\)|(?:up to|as on|as of|end-)\s*.+)$", raw, re.IGNORECASE)
+    if q_match:
+        qualifier = " " + q_match.group(1).strip()
+        cleaned_core = raw[:q_match.start()].lower().strip()
+    else:
+        cleaned_core = raw.lower()
+
+    match_fy_4 = re.search(r"fy\s*(20)?(\d{2})", cleaned_core)
     if match_fy_4:
-        return f"FY{match_fy_4.group(2)}"
+        return f"FY{match_fy_4.group(2)}{qualifier}"
 
-    match_range = re.search(r"20(\d{2})[-/](\d{2})", cleaned)
+    match_range = re.search(r"20(\d{2})[-/](\d{2})", cleaned_core)
     if match_range:
-        return f"FY{match_range.group(2)}"
+        return f"FY{match_range.group(2)}{qualifier}"
 
-    return cleaned
+    return raw
 
 
 def parse_dates_from_label(label: Optional[str]) -> Tuple[Optional[date], Optional[date], PeriodType]:

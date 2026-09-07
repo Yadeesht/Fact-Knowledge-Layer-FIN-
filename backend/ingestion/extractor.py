@@ -416,7 +416,18 @@ def process_extracted_candidate(
         needs_review = True
         review_reasons.extend(grounding_reasons)
 
-    if candidate.value_type in (ValueType.NUMBER, ValueType.CURRENCY) and not candidate.unit:
+    # Dimensionless metrics (indices, scores, rankings, ratios, statistical moments)
+    # do not have units and should not be flagged for missing units
+    DIMENSIONLESS_KEYWORDS = (
+        "index", "fi-index", "pmi", "ccpi", "ratio", "score", "rank", "ranking",
+        "standard deviation", "std dev", "skewness", "kurtosis", "parameter",
+        "elasticity", "multiplier"
+    )
+    concept_lower = (candidate.concept_name or "").lower()
+    source_lower = (candidate.source_label or "").lower()
+    is_dimensionless = any(kw in concept_lower or kw in source_lower for kw in DIMENSIONLESS_KEYWORDS)
+
+    if candidate.value_type in (ValueType.NUMBER, ValueType.CURRENCY) and not candidate.unit and not is_dimensionless:
         needs_review = True
         review_reasons.append("Missing numerical unit")
 

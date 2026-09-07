@@ -21,10 +21,23 @@ from backend.models.schema import ExtractedObservation
 # Individual grounding checks
 # ──────────────────────────────────────────────────
 
+def _normalize_minus_signs(text: str) -> str:
+    """Normalizes various typographic minuses and parenthesized minuses to a standard hyphen-minus."""
+    # Parenthesized minuses: e.g. "(-) 2.5", "(- )2.5", "(-)" -> "-"
+    text = re.sub(r"\(\s*-\s*\)\s*", "-", text)
+    # Unicode minuses: en-dash, em-dash, minus sign (\u2212, \u2013, \u2014)
+    text = re.sub(r"[\u2212\u2013\u2014]", "-", text)
+    # Spaced minuses before digits: "- 2.5" -> "-2.5"
+    text = re.sub(r"-\s+(?=\d)", "-", text)
+    return text
+
+
 def _check_value_in_evidence(obs: ExtractedObservation) -> Tuple[bool, Optional[str]]:
     """
     Check 1: The evidence quote should contain the numeric value.
-    Tolerates comma-formatting differences (e.g. 8,142.16 vs 8142.16).
+    Tolerates comma-formatting differences (e.g. 8,142.16 vs 8142.16)
+    and semantic negation (e.g. "contracting by 1.0%" -> -1.0%, "deflation of 2.5%" -> -2.5%,
+    "(-) 2.5%" -> -2.5%).
     """
     if obs.value_type == "text":
         # Text observations don't have numeric values to verify
@@ -38,6 +51,9 @@ def _check_value_in_evidence(obs: ExtractedObservation) -> Tuple[bool, Optional[
         num_val = float(obs.value)
     except (TypeError, ValueError):
         return True, None  # Non-numeric value, skip this check
+
+    # Normalize typographical/parenthesized minuses in quote
+    quote_clean = _normalize_minus_signs(quote.replace("\n", " ").replace("\r", " "))
 
     # Build candidate string representations of the number
     candidates = set()
@@ -86,11 +102,42 @@ def _check_value_in_evidence(obs: ExtractedObservation) -> Tuple[bool, Optional[
             expanded.add(c + dec_part)
         candidates.update(expanded)
 
-    # Search in quote
-    quote_clean = quote.replace("\n", " ").replace("\r", " ")
+    # 1. Direct search in quote (including normalized minuses like "-2.5")
     for candidate in candidates:
         if candidate in quote_clean:
             return True, None
+
+    # 2. Semantic negation check:
+    # If the observation is negative, the quote might use economic words
+    # (contracting, contraction, deflation, decline, fell, drop, negative)
+    # alongside the positive absolute value (e.g. "contracting by 1.0 per cent" -> value -1.0).
+    if num_val < 0:
+        abs_candidates = set()
+        abs_val = abs(num_val)
+        if abs_val == int(abs_val):
+            abs_candidates.add(str(int(abs_val)))
+        abs_candidates.add(str(abs_val))
+        abs_candidates.add(f"{abs_val:g}")
+
+        NEGATION_INDICATORS = [
+            "contracting", "contracted", "contraction",
+            "deflation", "deflated",
+            "declined", "decline", "declining",
+            "fell", "fall", "falling",
+            "dropped", "drop", "dropping",
+            "decrease", "decreased", "decreasing",
+            "negative", "down by", "depreciated", "decelerated"
+        ]
+
+        quote_lower = quote_clean.lower()
+        has_negation_word = any(neg in quote_lower for neg in NEGATION_INDICATORS)
+
+        for abs_cand in abs_candidates:
+            if abs_cand in quote_clean and has_negation_word:
+                return True, None
+            # Or formatted with a minus sign right before it
+            if re.search(rf"-\s*{re.escape(abs_cand)}\b", quote_clean):
+                return True, None
 
     return False, "Value not found in evidence quote"
 
@@ -158,7 +205,7 @@ def _check_period_in_evidence(obs: ExtractedObservation) -> Tuple[bool, Optional
                     prefix_region = quote[max(0, idx - 5):idx].strip()
                     if re.search(r"q[1-4]", prefix_region) or re.search(r"h[12]", prefix_region):
                         continue  # Skip — this is a quarter/half, not FY
-                return True, None
+                    return True, None
 
     # Quarter patterns: "Q1:2024-25" should match "Q1" + "2024-25"
     q_match = re.match(r"(q[1-4])\s*[:\-]?\s*(.+)", period)
@@ -203,32 +250,57 @@ def _check_period_in_evidence(obs: ExtractedObservation) -> Tuple[bool, Optional
 
 def _check_concept_plausibility(obs: ExtractedObservation) -> Tuple[bool, Optional[str]]:
     """
-    Check 3: The source_label and concept_name should be semantically compatible.
-    Catches cases where the LLM broadened "services sector growth" into "real GDP growth".
+    Check 3: The source_label, evidence quote, and concept_name should be semantically compatible.
+    Catches:
+    - Metric broadening: "services sector growth" → "real GDP growth"
+    - Cross-subject broadening: "R&D expenditure in GDP" → "real GDP growth"
+    - Ungrounded rate qualifiers: concept claims "growth" when evidence quote has no growth/change wording.
     """
     concept = (obs.concept_name or "").strip().lower()
     source = (obs.source_label or "").strip().lower()
+    quote = (obs.evidence_quote or "").strip().lower()
 
-    if not concept or not source:
-        return True, None  # Can't validate without both fields
-
-    # If they're the same, trivially fine
-    if concept == source:
+    if not concept:
         return True, None
+
+    # Check text comprising both source label and quote
+    check_text = f"{source} {quote}"
 
     # Known problematic broadening patterns
     BROADENING_PAIRS = [
-        # (source contains, concept contains) → suspicious broadening
-        ("services", "gdp"),
-        ("services sector", "gdp growth"),
-        ("agriculture", "gdp"),
-        ("manufacturing", "gdp"),
-        ("industrial", "gdp"),
+        # (context contains, concept contains, concept must not contain)
+        ("services", "gdp", "services"),
+        ("services sector", "gdp growth", "services"),
+        ("agriculture", "gdp", "agriculture"),
+        ("manufacturing", "gdp", "manufacturing"),
+        ("industrial", "gdp", "industrial"),
+        ("r&d", "gdp growth", "r&d"),
+        ("research & development", "gdp growth", "research"),
+        ("research and development", "gdp growth", "research"),
+        ("expenditure in gdp", "gdp growth", "expenditure"),
+        ("share in gdp", "gdp growth", "share"),
+        ("as % of gdp", "gdp growth", "as %"),
     ]
 
-    for source_kw, concept_kw in BROADENING_PAIRS:
-        if source_kw in source and concept_kw in concept and source_kw not in concept:
-            return False, f"Concept may not match source label: '{obs.source_label}' → '{obs.concept_name}'"
+    for context_kw, concept_kw, exempt_kw in BROADENING_PAIRS:
+        if context_kw in check_text and concept_kw in concept and exempt_kw not in concept:
+            return False, f"Concept '{obs.concept_name}' may not match source evidence context ('{context_kw}')"
+
+    # Rate of change / growth qualifier verification:
+    # If concept claims a delta/rate qualifier like "growth" or "expansion",
+    # the evidence quote MUST ground this qualifier.
+    DELTA_QUALIFIERS = ["growth", "expansion", "contraction", "deflation", "decline"]
+    for q in DELTA_QUALIFIERS:
+        if q in concept:
+            growth_indicators = [
+                "growth", "grew", "grow", "expanded", "expansion", "contracting",
+                "contracted", "contraction", "deflation", "deflated", "declined",
+                "decline", "declining", "fell", "fall", "falling", "increase",
+                "increased", "decreasing", "decreased", "decrease", "dropped",
+                "drop", "uptick", "moderated", "moderating", "y-o-y", "yoy", "m-o-m", "mom", "q-o-q", "qoq"
+            ]
+            if not any(gi in quote for gi in growth_indicators):
+                return False, f"Concept claims '{q}' but no growth or change terms found in evidence quote"
 
     return True, None
 
@@ -237,12 +309,48 @@ def _check_assertion_status(obs: ExtractedObservation) -> Tuple[bool, Optional[s
     """
     Check 4: If evidence language contains forecast/projection markers but
     assertion_status is "actual", flag for review.
+
+    Context-aware:
+    - Historical baselines (e.g. 2024, FY24, 2000-19, historical average) remain 'actual'
+      even if the evidence quote contains future projection markers for subsequent periods
+      (e.g. 'projected to moderate from 5.7% in 2024 to 4.3% in 2025').
+    - Values in comparative baseline positions ('from X', 'below X', 'compared with X')
+      are historical points of reference, not forecasts.
     """
     if obs.assertion_status != "actual":
         return True, None
 
     quote = (obs.evidence_quote or "").strip().lower()
     if not quote:
+        return True, None
+
+    # Check 1: Historical period exemption
+    period = (obs.period_label or "").strip().lower()
+    concept = (obs.concept_name or "").strip().lower()
+
+    is_historical = False
+    if any(h in concept for h in ["historical", "previous year", "a year ago"]):
+        is_historical = True
+    elif period:
+        # Check for historical years (e.g. 2024, 2023, FY24, FY23, 2000-19, or ranges ending in <= 24)
+        if re.search(r"\b(20[0-1]\d|202[0-4]|fy[0-1]\d|fy2[0-4])\b", period):
+            is_historical = True
+        elif re.search(r"\b\d{4}\s*[-–]\s*(?:19|20|21|22|23|24)\b", period):
+            is_historical = True
+
+    if is_historical:
+        # The observation refers to an explicit past/historical baseline period
+        return True, None
+
+    # Check 2: Comparative baseline syntax in quote
+    try:
+        val_str = f"{float(obs.value):g}"
+    except (TypeError, ValueError):
+        val_str = str(obs.value)
+
+    baseline_pattern = rf"(?:from|below|compared (?:with|to)|as against)\s+[^.;]*?\b{re.escape(val_str)}\b"
+    if re.search(baseline_pattern, quote):
+        # Value appears as a baseline starting point in comparative structure
         return True, None
 
     FORECAST_MARKERS = [

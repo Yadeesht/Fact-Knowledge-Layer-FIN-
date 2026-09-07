@@ -22,12 +22,17 @@ GROUNDING RULES — STRICT
 ========================
 
 1. Every observation MUST be directly stated in the supplied text.
-2. The evidence_quote MUST be a verbatim excerpt that contains
-   the value, the metric, and ideally the time period.
+2. The evidence_quote MUST be a verbatim excerpt that contains the full
+   defining subject noun phrase, the metric, and the value.
+   Never clip a quote to start mid-phrase (e.g. quote
+   "share of research & development (R&D) expenditure in GDP (0.6 per cent)",
+   NOT "GDP (0.6 per cent)").
 3. If a value does not appear explicitly in the text, do not extract it.
 4. If a metric is not explicitly named in the text, do not extract it.
-5. If a time period is not explicitly stated near the value,
-   set period_label to null rather than guessing.
+5. Time period association: Associate time periods that govern the sentence
+   or clause (e.g. "during 2024-25", "in March 2024",
+   "2024-25 (up to February 2025)"). Preserve exact qualifying phrases.
+   If no period can be confidently established, set period_label to null.
 
 
 ========================
@@ -40,13 +45,22 @@ You must NEVER:
   WRONG: "services sector growth" → concept "real GDP growth"
   RIGHT: "services sector growth" → concept "services sector growth"
 
+- Conflate levels with growth rates or ratios.
+  WRONG: "effective capital expenditure registered growth of 5.2%"
+         → concept "effective capital expenditure"
+  RIGHT: → concept "effective capital expenditure growth"
+  WRONG: "R&D expenditure in GDP (0.6%)" → concept "real GDP growth"
+  RIGHT: → concept "R&D expenditure as % of GDP"
+
 - Narrow a general metric into a specific one.
 
 - Substitute one metric for another.
 
-- Coerce a sub-annual period into a fiscal year.
+- Coerce a sub-annual or qualified period into a broad fiscal year.
   WRONG: "Q1:2024-25" → period_label "FY25"
   RIGHT: "Q1:2024-25" → period_label "Q1:2024-25", period_type "quarter"
+  WRONG: "2024-25 (up to February 2025)" → period_label "FY25"
+  RIGHT: "2024-25 (up to February 2025)", period_type "custom"
 
 - Extract a value from a page header, title, or metadata line
   when it is not a financial/economic data point.
@@ -72,8 +86,12 @@ Each observation represents a single atomic claim from the source:
 - entity_type: "company", "country", "central_bank", or "agency"
 
 - concept_name: The source-level metric or concept expressed by this claim.
-  Do not broaden, narrow, or substitute the metric.
-  Use the wording from the source text.
+  Must be specific to what is measured:
+  - If a percentage change (growth, expansion, contraction, decline),
+    concept_name MUST explicitly include "growth" or "change".
+  - If a ratio or share (e.g. share of GDP), concept_name MUST
+    explicitly include "as % of [base]" or "share of [base]".
+  - For dimensionless indices (FI-Index, PMI, CCPI), use the full index name.
 
 - source_label: The exact verbatim label used in the document
   (e.g. column header, row label, or phrase preceding the number).
@@ -81,16 +99,18 @@ Each observation represents a single atomic claim from the source:
 - value_type: "number", "percentage", "currency", or "text"
 
 - value: The numeric amount as it appears in the text,
-  or a textual fact if non-numeric.
+  or a textual fact if non-numeric. If negative or expressing
+  contraction/deflation/decline, preserve the negative sign (-X).
 
 - unit: The unit exactly as reported in the source
-  (e.g. "₹ crore", "INR million", "%", "million parcels").
-  Do not convert or normalize units.
+  (e.g. "₹ crore", "INR million", "%", "million parcels", "bps").
+  For dimensionless indices or pure scores/ratios (e.g. FI-Index, PMI),
+  set unit to null.
 
 - period_label: The time period exactly as expressed in the source.
-  Examples: "FY24", "FY2024-25", "Q1:2024-25", "H1 FY25",
-  "2000-19", "April-September 2024".
-  If no period is stated near the value, set to null.
+  Preserve qualifiers (e.g. "FY24", "FY2024-25", "Q1:2024-25", "H1 FY25",
+  "2000-19", "March 2024", "2024-25 (up to February 2025)").
+  If no period is stated in the context of the value, set to null.
 
 - period_type: "fiscal_year", "half_year", "quarter", "month",
   "instant", or "custom"
@@ -102,19 +122,28 @@ Each observation represents a single atomic claim from the source:
     "consolidation": "consolidated", "standalone", or "unknown"
   }
 
-- assertion_status: Classify based on the language in the source:
+- assertion_status: Classify based on the linguistic scope of the assertion:
 
   actual:
-    reported historical data with no qualification
+    Reported historical data with no forward qualification.
+    CRITICAL SCOPE RULE: In comparative sentences with future projections
+    (e.g. "is expected to moderate from 5.7% in 2024 to 4.3% in 2025",
+    or "likely to grow below historical average of 3.7% and below 3.3% in 2024"),
+    the historical baselines (5.7% in 2024, 3.3% in 2024, 3.7% historical average)
+    are ACTUAL. The projection verb applies ONLY to the future periods.
 
   estimate:
     advance estimate, revised estimate, provisional, estimated
 
   forecast:
-    projected, likely to, expected to, forecast
+    projected, likely to, expected to, forecast for future periods.
+    Also use for probabilistic expectations about outturns
+    (e.g. "consolidated GFD is likely to remain within budget estimate of 3.2%").
 
   target:
-    budgeted, target, budget estimate
+    Policy plans, target allocations, and budgeted amounts
+    (e.g. "Asset Monetisation Plan aimed at unlocking ₹10 lakh crore",
+    "target of 100 GW nuclear power").
 
   restated:
     explicitly restated
@@ -130,7 +159,7 @@ Each observation represents a single atomic claim from the source:
 - page_number: The integer page number from the [CHUNK ...] tag.
 
 - evidence_quote: Exact supporting excerpt from the text (verbatim quote).
-  Must directly contain or support the extracted value.
+  Must directly contain the value and the defining subject noun phrase.
 
 - confidence: Float between 0.0 and 1.0 reflecting extraction clarity.
 
