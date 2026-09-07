@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Financial Fact Knowledge Layer | Rules-First Reconciliation Engine</title>
+  <meta name="description"
+    content="Evidence-grounded financial knowledge extraction, unit normalization, and rules-first deterministic reconciliation engine." />
+
+  <!-- Modern Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+
+  <link rel="stylesheet" href="./style.css" />
+</head>
+
+<body class="dark-theme">
+  <!-- Top Navigation / Header -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+          </svg>
+        </div>
+        <div>
+          <div class="brand-title">Financial Fact Knowledge Layer</div>
+          <div class="brand-subtitle">Rules-First Reconciliation Engine &amp; Evidence Grounding</div>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <div class="api-status-badge" id="apiStatusBadge">
+          <span class="status-dot"></span>
+          <span id="apiStatusText">Connecting...</span>
+        </div>
+        <input type="file" id="pdfFileInput" accept=".pdf" style="display:none;" onchange="handlePDFUpload(event)" />
+        <button class="btn" style="background: rgba(255, 255, 255, 0.08); color: #fff;" onclick="document.getElementById('pdfFileInput').click()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          Upload PDF
+        </button>
+        <button class="btn btn-primary" id="btnRunReconcile" onclick="triggerReconcile()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+          Re-Run Reconciliation
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-container">
+    <!-- Quick Metrics Overview -->
+    <section class="metrics-grid" id="metricsOverview">
+      <div class="metric-card">
+        <div class="metric-icon doc-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+        </div>
+        <div>
+          <div class="metric-value" id="statDocCount">6</div>
+          <div class="metric-label">Grounded Filings</div>
+        </div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon obs-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 14 14"></polyline>
+          </svg>
+        </div>
+        <div>
+          <div class="metric-value" id="statObsCount">12</div>
+          <div class="metric-label">Atomic Observations</div>
+        </div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon corr-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+          </svg>
+        </div>
+        <div>
+          <div class="metric-value" id="statCorrCount">3</div>
+          <div class="metric-label">Corroborated</div>
+        </div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon cont-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="15" y1="9" x2="9" y2="15"></line>
+            <line x1="9" y1="9" x2="15" y2="15"></line>
+          </svg>
+        </div>
+        <div>
+          <div class="metric-value" id="statContCount">1</div>
+          <div class="metric-label">Contradicted</div>
+        </div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon ctx-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path
+              d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
+            </path>
+          </svg>
+        </div>
+        <div>
+          <div class="metric-value" id="statCtxCount">3</div>
+          <div class="metric-label">Contextualized</div>
+        </div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon rev-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </div>
+        <div>
+          <div class="metric-value" id="statReviewCount">1</div>
+          <div class="metric-label">Needs Review</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Navigation Tabs (Matching Section 33 Core Views) -->
+    <nav class="tabs-nav" id="mainTabs">
+      <button class="tab-btn active" data-tab="showcaseTab" onclick="switchTab('showcaseTab')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+        </svg>
+        Required Cases
+      </button>
+      <button class="tab-btn" data-tab="documentsTab" onclick="switchTab('documentsTab')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+        </svg>
+        Documents
+      </button>
+      <button class="tab-btn" data-tab="factsTab" onclick="switchTab('factsTab')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="9" y1="3" x2="9" y2="21"></line>
+        </svg>
+        Canonical Facts
+      </button>
+      <button class="tab-btn" data-tab="observationsTab" onclick="switchTab('observationsTab')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="8" y1="6" x2="21" y2="6"></line>
+          <line x1="8" y1="12" x2="21" y2="12"></line>
+          <line x1="8" y1="18" x2="21" y2="18"></line>
+          <line x1="3" y1="6" x2="3.01" y2="6"></line>
+          <line x1="3" y1="12" x2="3.01" y2="12"></line>
+          <line x1="3" y1="18" x2="3.01" y2="18"></line>
+        </svg>
+        Atomic Observations
+      </button>
+      <button class="tab-btn" data-tab="relationshipsTab" onclick="switchTab('relationshipsTab')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="18" cy="5" r="3"></circle>
+          <circle cx="6" cy="12" r="3"></circle>
+          <circle cx="18" cy="19" r="3"></circle>
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+        </svg>
+        Relationships
+      </button>
+      <button class="tab-btn" data-tab="needsReviewTab" onclick="switchTab('needsReviewTab')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+          <line x1="12" y1="9" x2="12" y2="13"></line>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+        Needs Review
+      </button>
+      <button class="tab-btn" data-tab="observabilityTab" onclick="switchTab('observabilityTab')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+        </svg>
+        Observability
+      </button>
+      <button class="tab-btn" data-tab="liveExtractTab" onclick="switchTab('liveExtractTab')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+          <line x1="12" y1="22.08" x2="12" y2="12"></line>
+        </svg>
+        Live LLM Studio
+      </button>
+    </nav>
+
+    <!-- TAB 1: 4 CORE SHOWCASE CASES -->
+    <section class="tab-content active" id="showcaseTab">
+      <div class="section-intro">
+        <h2>Evaluator Showcase: 4 Critical Reconciliation Cases</h2>
+        <p>Direct demonstration of the rules-first deterministic cascade on Delhivery and Indian Macroeconomy filings.
+        </p>
+      </div>
+
+      <div class="showcase-selector-grid" id="showcaseSelectorGrid">
+        <!-- Injected via JavaScript -->
+      </div>
+
+      <!-- Active Showcase Interactive Inspector -->
+      <div class="showcase-inspector-panel" id="showcaseInspector">
+        <!-- Injected via JavaScript -->
+      </div>
+    </section>
+
+    <!-- TAB: DOCUMENTS EXPLORER -->
+    <section class="tab-content" id="documentsTab">
+      <div class="section-intro">
+        <h2>Source Filings &amp; Document Classification</h2>
+        <p>Inferred metadata and layout properties across the starter dataset PDFs (Section 2 &amp; 33).</p>
+      </div>
+
+      <div class="architecture-diagram-card" style="margin-bottom: 1.5rem; text-align: center; border-style: dashed; padding: 1.5rem; cursor: pointer; background: rgba(99,102,241,0.05);" onclick="document.getElementById('pdfFileInput').click()">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent-primary); margin-bottom: 0.35rem;">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        <h4 style="font-size: 0.95rem;">Upload PDF Document for Synchronous Ingestion (§5 &amp; §11)</h4>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Click to upload any financial PDF filing. The pipeline will synchronously chunk, extract atomic observations, normalize values, and evaluate relationships.</p>
+      </div>
+
+      <div class="observations-grid" id="documentsGrid">
+        <!-- Injected via JS -->
+      </div>
+    </section>
+
+    <!-- TAB: CANONICAL FACTS (§2 & §12) -->
+    <section class="tab-content" id="factsTab">
+      <div class="section-intro">
+        <h2>Canonical Facts (Grouped Observations)</h2>
+        <p>A "Fact" in the UI represents a grouped set of observations sharing canonical entity and concept. Expand any fact to view its underlying claims, verbatim quotes, and pairwise reconciliation status.</p>
+      </div>
+
+      <div class="filter-bar">
+        <div class="filter-group">
+          <label>Filter by Status:</label>
+          <select id="factFilterStatus" onchange="filterFacts()">
+            <option value="all">All Facts</option>
+            <option value="corroborated">Corroborated</option>
+            <option value="contradicted">Contradicted</option>
+            <option value="contextualized">Contextualized</option>
+            <option value="single_source">Single Source</option>
+            <option value="needs_review">Needs Review</option>
+          </select>
+        </div>
+        <div class="search-group">
+          <input type="text" id="factSearchInput" placeholder="Search by entity or metric..." onkeyup="filterFacts()" />
+        </div>
+      </div>
+
+      <div class="relationships-list" id="factsList">
+        <!-- Injected via JS -->
+      </div>
+    </section>
+
+    <!-- TAB 2: RECONCILIATION MATRIX -->
+    <section class="tab-content" id="relationshipsTab">
+      <div class="section-intro">
+        <h2>Reconciliation Knowledge Graph</h2>
+        <p>All pairwise observation comparisons evaluated by the deterministic cascade and semantic judge.</p>
+      </div>
+
+      <div class="filter-bar">
+        <div class="filter-group">
+          <label>Filter Type:</label>
+          <select id="relTypeFilter" onchange="filterRelationships()">
+            <option value="all">All Relationships</option>
+            <option value="corroborated">Corroborated</option>
+            <option value="contradicted">Contradicted</option>
+            <option value="contextualized">Contextualized</option>
+            <option value="unresolved">Unresolved</option>
+          </select>
+        </div>
+        <div class="search-group">
+          <input type="text" id="relSearchInput" placeholder="Search entity, concept, or reasons..."
+            onkeyup="filterRelationships()" />
+        </div>
+      </div>
+
+      <div class="relationships-list" id="relationshipsList">
+        <!-- Injected via JS -->
+      </div>
+    </section>
+
+    <!-- TAB 3: GROUNDED OBSERVATIONS -->
+    <section class="tab-content" id="observationsTab">
+      <div class="section-intro">
+        <h2>Atomic Extracted Claims (Observations)</h2>
+        <p>Each observation represents a single standardized claim strictly anchored to an exact PDF excerpt.</p>
+      </div>
+
+      <div class="filter-bar">
+        <div class="filter-group">
+          <label>Filter by Status:</label>
+          <select id="obsFilterStatus" onchange="filterObservations()">
+            <option value="all">All Observations</option>
+            <option value="review_only">Needs Review Only</option>
+            <option value="actual">Actuals Only</option>
+            <option value="estimate">Estimates / Forecasts Only</option>
+          </select>
+        </div>
+        <div class="search-group">
+          <input type="text" id="obsSearchInput" placeholder="Search by entity name or metric..."
+            onkeyup="filterObservations()" />
+        </div>
+      </div>
+
+      <div class="observations-grid" id="observationsGrid">
+        <!-- Injected via JS -->
+      </div>
+    </section>
+
+    <!-- TAB: NEEDS REVIEW (QUARANTINE QUEUE) -->
+    <section class="tab-content" id="needsReviewTab">
+      <div class="section-intro">
+        <h2>Needs Review (Quarantine Queue)</h2>
+        <p>Observations flagged for unreliable units, missing timeframe anchors, or low confidence. These are quarantined and barred from candidate matching to prevent graph contamination (Section 26).</p>
+      </div>
+
+      <div class="observations-grid" id="needsReviewGrid">
+        <!-- Injected via JS -->
+      </div>
+    </section>
+
+    <!-- TAB 4: PIPELINE OBSERVABILITY -->
+    <section class="tab-content" id="observabilityTab">
+      <div class="section-intro">
+        <h2>Ingestion Pipeline &amp; Audit Trail</h2>
+        <p>Execution logs and observability metrics across PDF parsing, chunking, extraction, normalization, and
+          reconciliation.</p>
+      </div>
+
+      <div class="architecture-diagram-card">
+        <h3>System Architecture &amp; Decision Flow</h3>
+        <div class="flow-steps">
+          <div class="flow-step">
+            <div class="step-badge">1</div>
+            <h4>PDF Parser</h4>
+            <p>100-page excerpting, page preservation, text &amp; table chunking</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="step-badge">2</div>
+            <h4>LLM Extraction</h4>
+            <p>Candidate claims, source quote, page locator, status</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="step-badge">3</div>
+            <h4>Normalization</h4>
+            <p>Unit multipliers (Cr/Mn), % preservation, canonical aliases</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="step-badge">4</div>
+            <h4>Deterministic Cascade</h4>
+            <p>Entity → Concept → Scope → Time → Materiality (0.1%)</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <div class="step-badge">5</div>
+            <h4>LLM Judge Fallback</h4>
+            <p>Structured JSON fallback when rules conclude None</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="runs-container">
+        <h3>Processing Run History (<code>processing_runs</code> table)</h3>
+        <div class="runs-list" id="runsList">
+          <!-- Injected via JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: LIVE LLM STUDIO -->
+    <section class="tab-content" id="liveExtractTab">
+      <div class="section-intro">
+        <h2>Live LLM Extraction &amp; Reconciliation Studio</h2>
+        <p>Directly test live LLM fact extraction and reconciliation with Google Gemini or OpenAI, grounded in source quotes.</p>
+      </div>
+
+      <!-- LLM Configuration Panel -->
+      <div class="architecture-diagram-card" style="margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div>
+            <h3 style="margin-bottom: 0.25rem;">LLM Provider Configuration</h3>
+            <span id="llmStatusIndicator" style="font-size: 0.82rem; color: var(--text-muted);">Detecting credentials...</span>
+          </div>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <select id="llmProviderSelect" style="background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); padding: 0.4rem 0.75rem; border-radius: 6px;">
+              <option value="gemini">Google Gemini</option>
+              <option value="openai">OpenAI (GPT-4o-mini)</option>
+            </select>
+            <input type="password" id="llmApiKeyInput" placeholder="Paste API Key (optional)" style="background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); padding: 0.4rem 0.75rem; border-radius: 6px; width: 220px;" />
+            <button class="btn btn-primary" onclick="saveLLMKey()" style="padding: 0.4rem 0.85rem; font-size: 0.82rem;">Save Key</button>
+          </div>
+        </div>
+        <p style="font-size: 0.78rem; color: var(--text-dim);">
+          * Zero external credentials required to run. When no key is provided, the engine automatically uses an offline heuristic parser and the pre-computed ground-truth knowledge base.
+        </p>
+      </div>
+
+      <!-- Live Interactive Extraction Form -->
+      <div class="showcase-inspector-panel">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h4>Input Text / Document Excerpt</h4>
+          <div style="display: flex; gap: 0.5rem;">
+            <button class="btn" style="background: rgba(255,255,255,0.06); color:#cbd5e1; font-size:0.75rem;" onclick="loadPresetText('delhivery')">Load Delhivery Excerpt</button>
+            <button class="btn" style="background: rgba(255,255,255,0.06); color:#cbd5e1; font-size:0.75rem;" onclick="loadPresetText('gdp')">Load Macro GDP Excerpt</button>
+          </div>
+        </div>
+
+        <textarea id="liveExtractTextarea" rows="5" style="width: 100%; background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); border-radius: 8px; padding: 0.85rem; font-family: var(--font-mono); font-size: 0.85rem; resize: vertical;" placeholder="Paste text from any financial or macroeconomic report..."></textarea>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
+          <div style="display: flex; gap: 1rem; font-size: 0.82rem; color: var(--text-muted);">
+            <span>Page Number: <input type="number" id="liveExtractPage" value="1" style="width: 55px; background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 0.2rem 0.4rem;" /></span>
+            <span>Document ID: <input type="text" id="liveExtractDocId" value="live_filing_input" style="width: 140px; background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 0.2rem 0.4rem;" /></span>
+          </div>
+          <button class="btn btn-primary" id="btnLiveExtract" onclick="runLiveExtraction()">
+            Extract Grounded Observations &amp; Reconcile
+          </button>
+        </div>
+
+        <!-- Live Extraction Results Container -->
+        <div id="liveExtractResults" style="margin-top: 1.5rem; display: none;">
+          <!-- Injected dynamically -->
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Evidence Inspector Modal Drawer -->
+  <div class="modal-backdrop" id="evidenceModal" onclick="closeEvidenceModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 id="modalTitle">Evidence Inspector</h3>
+        <button class="modal-close" onclick="closeEvidenceModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modalBody">
+        <!-- Injected dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <footer class="app-footer">
+    <div class="footer-container">
+      <span>Financial Fact Knowledge Layer &bull; Developed with Python, FastAPI, SQLite &amp; Vanilla Web
+        Technologies</span>
+      <span class="footer-hint">Press 1-4 to quickly cycle showcase demo cases</span>
+    </div>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+
+</html>
