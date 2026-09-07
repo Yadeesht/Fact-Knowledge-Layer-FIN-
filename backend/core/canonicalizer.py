@@ -4,17 +4,12 @@ from backend.models.schema import Observation, Entity, Concept
 ENTITY_ALIASES = {
     "delhivery": "delhivery limited",
     "delhivery ltd": "delhivery limited",
-    "delhivery limited": "delhivery limited",
     "rbi": "reserve bank of india",
-    "reserve bank of india": "reserve bank of india",
     "imf": "international monetary fund",
-    "international monetary fund": "international monetary fund",
     "fund": "international monetary fund",
     "goi": "government of india",
-    "government of india": "government of india",
     "ministry of finance": "government of india",
     "mof": "government of india",
-    "india": "india",
     "republic of india": "india",
     "indian economy": "india",
 }
@@ -25,25 +20,13 @@ CONCEPT_ALIASES = {
     "total turnover": "revenue",
     "total sales": "revenue",
     "total revenue": "revenue",
-    "revenue": "revenue",
-    "revenue from operations": "revenue from operations",
-    "revenue from contracts with customers": "revenue from contracts with customers",
-    "revenue from traded goods": "revenue from traded goods",
-    "real gdp growth": "real gdp growth",
     "real gdp growth rate": "real gdp growth",
     "gdp growth": "real gdp growth",
     "gdp growth rate": "real gdp growth",
-    "nominal gdp growth": "nominal gdp growth",
-    "headline cpi inflation": "headline cpi inflation",
     "cpi inflation": "headline cpi inflation",
     "consumer price index inflation": "headline cpi inflation",
-    "core cpi inflation": "core cpi inflation",
-    "current account deficit": "current account deficit",
     "cad": "current account deficit",
-    "express parcel volume": "express parcel volume",
     "express parcel shipment volume": "express parcel volume",
-    "active customers": "active customers",
-    "pin codes serviced": "pin codes serviced",
     "team size": "total workforce",
     "employees": "total workforce",
     "total employees": "total workforce",
@@ -61,6 +44,11 @@ def canonicalize_concept_name(raw_name: str) -> str:
 
 
 def entities_match(a: Observation, b: Observation) -> bool:
+    if a.entity.id and b.entity.id:
+        if a.entity.id == b.entity.id:
+            return True
+        return False
+
     name_a = canonicalize_entity_name(a.entity.canonical_name)
     name_b = canonicalize_entity_name(b.entity.canonical_name)
     if name_a == name_b:
@@ -77,6 +65,11 @@ def entities_match(a: Observation, b: Observation) -> bool:
 
 
 def concepts_match(a: Observation, b: Observation) -> bool:
+    if a.concept.id and b.concept.id:
+        if a.concept.id == b.concept.id:
+            return True
+        return False
+
     concept_a = canonicalize_concept_name(a.concept.canonical_name)
     concept_b = canonicalize_concept_name(b.concept.canonical_name)
     if concept_a == concept_b:

@@ -1,7 +1,8 @@
 import json
 import sqlite3
-from typing import List, Optional, Dict, Any
-from datetime import datetime
+from typing import List, Optional, Dict, Any, Union
+from datetime import datetime, timezone
+from pathlib import Path
 from backend.db.database import get_db_connection
 from backend.models.schema import (
     Observation,
@@ -20,8 +21,22 @@ from backend.models.schema import (
 
 
 class Repository:
-    def __init__(self, db_conn: Optional[sqlite3.Connection] = None):
-        self.conn = db_conn or get_db_connection()
+    def __init__(
+        self,
+        db_conn: Optional[Union[sqlite3.Connection, Path, str]] = None,
+        db_path: Optional[Union[Path, str]] = None,
+    ):
+        target_path = db_path
+        if isinstance(db_conn, (Path, str)):
+            target_path = db_conn
+            db_conn = None
+
+        if db_conn is not None:
+            self.conn = db_conn
+        elif target_path is not None:
+            self.conn = get_db_connection(Path(target_path))
+        else:
+            self.conn = get_db_connection()
 
     def close(self):
         self.conn.close()
@@ -154,56 +169,114 @@ class Repository:
     # Entity & Concept operations
     # -----------------------------
     def get_or_create_entity(
-        self, canonical_name: str, entity_type: Optional[str] = None, aliases: Optional[List[str]] = None
+        self,
+        canonical_name: str,
+        entity_type: Optional[str] = None,
+        aliases: Optional[List[str]] = None,
+        embedding: Optional[List[float]] = None,
     ) -> str:
         with self.conn:
             cursor = self.conn.execute(
-                "SELECT id, aliases_json FROM entities WHERE canonical_name = ?", (canonical_name,)
+                "SELECT id, aliases_json, embedding_json FROM entities WHERE canonical_name = ?", (canonical_name,)
             )
             row = cursor.fetchone()
             aliases_list = aliases or []
             if row:
+                updates = []
+                params = []
                 if aliases_list and row["aliases_json"]:
                     existing_aliases = json.loads(row["aliases_json"])
                     merged = list(set(existing_aliases + aliases_list))
-                    self.conn.execute(
-                        "UPDATE entities SET aliases_json = ? WHERE id = ?",
-                        (json.dumps(merged), row["id"]),
-                    )
+                    updates.append("aliases_json = ?")
+                    params.append(json.dumps(merged))
+                if embedding and not row["embedding_json"]:
+                    updates.append("embedding_json = ?")
+                    params.append(json.dumps(embedding))
+                if updates:
+                    params.append(row["id"])
+                    self.conn.execute(f"UPDATE entities SET {', '.join(updates)} WHERE id = ?", tuple(params))
                 return row["id"]
 
             entity_id = f"ent_{canonical_name.lower().replace(' ', '_')}"
+            emb_json = json.dumps(embedding) if embedding else None
             self.conn.execute(
-                "INSERT INTO entities (id, canonical_name, entity_type, aliases_json) VALUES (?, ?, ?, ?)",
-                (entity_id, canonical_name, entity_type, json.dumps(aliases_list)),
+                "INSERT INTO entities (id, canonical_name, entity_type, aliases_json, embedding_json) VALUES (?, ?, ?, ?, ?)",
+                (entity_id, canonical_name, entity_type, json.dumps(aliases_list), emb_json),
             )
             return entity_id
 
     def get_or_create_concept(
-        self, canonical_name: str, description: Optional[str] = None, aliases: Optional[List[str]] = None
+        self,
+        canonical_name: str,
+        description: Optional[str] = None,
+        aliases: Optional[List[str]] = None,
+        embedding: Optional[List[float]] = None,
     ) -> str:
         with self.conn:
             cursor = self.conn.execute(
-                "SELECT id, aliases_json FROM concepts WHERE canonical_name = ?", (canonical_name,)
+                "SELECT id, aliases_json, embedding_json FROM concepts WHERE canonical_name = ?", (canonical_name,)
             )
             row = cursor.fetchone()
             aliases_list = aliases or []
             if row:
+                updates = []
+                params = []
                 if aliases_list and row["aliases_json"]:
                     existing_aliases = json.loads(row["aliases_json"])
                     merged = list(set(existing_aliases + aliases_list))
-                    self.conn.execute(
-                        "UPDATE concepts SET aliases_json = ? WHERE id = ?",
-                        (json.dumps(merged), row["id"]),
-                    )
+                    updates.append("aliases_json = ?")
+                    params.append(json.dumps(merged))
+                if embedding and not row["embedding_json"]:
+                    updates.append("embedding_json = ?")
+                    params.append(json.dumps(embedding))
+                if updates:
+                    params.append(row["id"])
+                    self.conn.execute(f"UPDATE concepts SET {', '.join(updates)} WHERE id = ?", tuple(params))
                 return row["id"]
 
             concept_id = f"cpt_{canonical_name.lower().replace(' ', '_')}"
+            emb_json = json.dumps(embedding) if embedding else None
             self.conn.execute(
-                "INSERT INTO concepts (id, canonical_name, description, aliases_json) VALUES (?, ?, ?, ?)",
-                (concept_id, canonical_name, description, json.dumps(aliases_list)),
+                "INSERT INTO concepts (id, canonical_name, description, aliases_json, embedding_json) VALUES (?, ?, ?, ?, ?)",
+                (concept_id, canonical_name, description, json.dumps(aliases_list), emb_json),
             )
             return concept_id
+
+    def list_all_concepts(self) -> List[Dict[str, Any]]:
+        """Returns all concepts stored in the database with their aliases and embeddings."""
+        cursor = self.conn.execute("SELECT * FROM concepts")
+        results = []
+        for r in cursor.fetchall():
+            item = dict(r)
+            item["aliases"] = json.loads(item["aliases_json"]) if item.get("aliases_json") else []
+            item["embedding"] = json.loads(item["embedding_json"]) if item.get("embedding_json") else None
+            results.append(item)
+        return results
+
+    def list_all_entities(self) -> List[Dict[str, Any]]:
+        """Returns all entities stored in the database with their aliases and embeddings."""
+        cursor = self.conn.execute("SELECT * FROM entities")
+        results = []
+        for r in cursor.fetchall():
+            item = dict(r)
+            item["aliases"] = json.loads(item["aliases_json"]) if item.get("aliases_json") else []
+            item["embedding"] = json.loads(item["embedding_json"]) if item.get("embedding_json") else None
+            results.append(item)
+        return results
+
+    def update_concept_embedding(self, concept_id: str, embedding: List[float]) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE concepts SET embedding_json = ? WHERE id = ?",
+                (json.dumps(embedding), concept_id),
+            )
+
+    def update_entity_embedding(self, entity_id: str, embedding: List[float]) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE entities SET embedding_json = ? WHERE id = ?",
+                (json.dumps(embedding), entity_id),
+            )
 
     # -----------------------------
     # Observation operations

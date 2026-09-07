@@ -30,14 +30,16 @@ CREATE TABLE IF NOT EXISTS entities (
     id TEXT PRIMARY KEY,
     canonical_name TEXT NOT NULL UNIQUE,
     entity_type TEXT,
-    aliases_json TEXT
+    aliases_json TEXT,
+    embedding_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS concepts (
     id TEXT PRIMARY KEY,
     canonical_name TEXT NOT NULL UNIQUE,
     description TEXT,
-    aliases_json TEXT
+    aliases_json TEXT,
+    embedding_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS observations (
@@ -124,16 +126,20 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
         if "chunk_type" not in columns:
             cursor.execute("ALTER TABLE chunks ADD COLUMN chunk_type TEXT")
 
-        # Entities aliases_json
+        # Entities aliases_json and embedding_json
         cursor.execute("PRAGMA table_info(entities)")
         columns = [row["name"] for row in cursor.fetchall()]
         if "aliases_json" not in columns:
             cursor.execute("ALTER TABLE entities ADD COLUMN aliases_json TEXT")
+        if "embedding_json" not in columns:
+            cursor.execute("ALTER TABLE entities ADD COLUMN embedding_json TEXT")
 
-        # Concepts aliases_json
+        # Concepts aliases_json and embedding_json
         cursor.execute("PRAGMA table_info(concepts)")
         columns = [row["name"] for row in cursor.fetchall()]
         if "aliases_json" not in columns:
             cursor.execute("ALTER TABLE concepts ADD COLUMN aliases_json TEXT")
+        if "embedding_json" not in columns:
+            cursor.execute("ALTER TABLE concepts ADD COLUMN embedding_json TEXT")
 
     conn.close()

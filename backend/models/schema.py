@@ -83,6 +83,7 @@ class TimeContext(BaseModel):
 # -------------------------
 
 class Entity(BaseModel):
+    id: Optional[str] = None
     canonical_name: str
     entity_type: Optional[str] = None
 
@@ -95,12 +96,44 @@ class Entity(BaseModel):
 # -------------------------
 
 class Concept(BaseModel):
+    id: Optional[str] = None
     canonical_name: str
 
     # Original wording from document
     source_label: Optional[str] = None
 
     definition: Optional[str] = None
+
+
+# -------------------------
+# Dynamic Resolution Schemas
+# -------------------------
+
+class ResolutionStatus(str, Enum):
+    MATCHED = "matched"
+    NEW = "new"
+    AMBIGUOUS = "ambiguous"
+
+
+class ConceptResolution(BaseModel):
+    canonical_concept_id: Optional[str] = None
+    canonical_name: str
+    status: ResolutionStatus
+    similarity: Optional[float] = None
+    matched_via: str  # "exact", "alias", "embedding_high", "llm_judge", "new_concept"
+    candidates: List[Dict[str, Any]] = Field(default_factory=list)
+    explanation: Optional[str] = None
+
+
+class EntityResolution(BaseModel):
+    canonical_entity_id: Optional[str] = None
+    canonical_name: str
+    entity_type: Optional[str] = None
+    status: ResolutionStatus
+    similarity: Optional[float] = None
+    matched_via: str  # "exact", "alias", "embedding_high", "llm_judge", "new_entity"
+    candidates: List[Dict[str, Any]] = Field(default_factory=list)
+    explanation: Optional[str] = None
 
 
 # -------------------------

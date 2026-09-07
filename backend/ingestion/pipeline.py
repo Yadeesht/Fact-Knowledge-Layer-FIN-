@@ -124,7 +124,7 @@ def process_pdf_document(
             if is_cancellation_requested():
                 raise InterruptedError(f"Processing cancelled by user at batch {b_idx + 1}/{len(batches)}.")
 
-            obs_list = extract_observations_from_batch(batch, document_id=doc_id)
+            obs_list = extract_observations_from_batch(batch, document_id=doc_id, repo=repo)
             for obs in obs_list:
                 repo.save_observation(obs, dataset=dataset)
                 extracted_observations.append(obs)

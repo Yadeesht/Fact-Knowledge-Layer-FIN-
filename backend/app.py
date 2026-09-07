@@ -390,6 +390,30 @@ def search_knowledge(q: str = Query(..., min_length=1)):
         repo.close()
 
 
+@app.get("/api/concepts")
+def get_all_concepts():
+    """
+    GET /api/concepts: Returns the dynamic vocabulary of canonical concepts.
+    """
+    repo = Repository()
+    try:
+        return repo.list_all_concepts()
+    finally:
+        repo.close()
+
+
+@app.get("/api/entities")
+def get_all_entities():
+    """
+    GET /api/entities: Returns the dynamic entities registered in the system.
+    """
+    repo = Repository()
+    try:
+        return repo.list_all_entities()
+    finally:
+        repo.close()
+
+
 # -------------------------------------------------------------
 # 6. Evaluator Showcase Cases
 # -------------------------------------------------------------

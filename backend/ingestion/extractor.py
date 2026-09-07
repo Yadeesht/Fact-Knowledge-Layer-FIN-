@@ -14,9 +14,12 @@ from backend.models.schema import (
     ValueType,
     PeriodType,
     AssertionStatus,
+    ResolutionStatus,
 )
 from backend.core.normalizer import normalize_fact_value
 from backend.core.canonicalizer import canonicalize_entity_name, canonicalize_concept_name
+from backend.core.concept_resolver import resolve_concept
+from backend.core.entity_resolver import resolve_entity
 from backend.core.temporal import normalize_fiscal_year
 from backend.core.prompts import EXTRACTION_SYSTEM_PROMPT, get_extraction_user_prompt
 from backend.core.grounding_validator import validate_grounding
@@ -61,6 +64,7 @@ def resolve_chunk_for_observation(
 def extract_observations_from_batch(
     batch: LLMBatch,
     document_id: str,
+    repo: Optional[Any] = None,
 ) -> List[Observation]:
     """
     Unified extraction engine: extracts atomic observations from an LLM batch
@@ -129,6 +133,7 @@ def extract_observations_from_batch(
             document_id=document_id,
             chunk_id=target_chunk_id,
             grounding_reasons=grounding_reasons,
+            repo=repo,
         )
         observations.append(obs)
 
@@ -140,6 +145,7 @@ def extract_observations_from_text(
     page_number: int,
     document_id: str,
     chunk_id: Optional[str] = None,
+    repo: Optional[Any] = None,
 ) -> List[Observation]:
     """
     Convenience wrapper that packages single text into an LLMBatch,
@@ -161,7 +167,7 @@ def extract_observations_from_text(
         }],
         total_chars=len(text),
     )
-    return extract_observations_from_batch(single_batch, document_id=document_id)
+    return extract_observations_from_batch(single_batch, document_id=document_id, repo=repo)
 
 
 def _pattern_extract_fallback(*args, **kwargs) -> List[Observation]:
@@ -175,29 +181,44 @@ def process_extracted_candidate(
     document_id: str,
     chunk_id: Optional[str] = None,
     grounding_reasons: Optional[List[str]] = None,
+    repo: Optional[Any] = None,
 ) -> Observation:
     """
     Transforms an LLM-proposed candidate into a standardized Observation:
-    1. Canonicalizes entity and concept names
+    1. Resolves dynamic entity and concept (via dynamic semantic resolver)
     2. Normalizes numerical value and scale multipliers
     3. Normalizes reporting periods
-    4. Evaluates whether human review is required (incl. grounding checks)
+    4. Evaluates whether human review is required (incl. grounding checks and resolution ambiguity)
     """
     obs_id = f"obs_{uuid.uuid4().hex[:8]}"
 
-    # Entity canonicalization
-    canon_entity_name = canonicalize_entity_name(candidate.entity_name)
-    entity = Entity(
-        canonical_name=canon_entity_name,
+    # Dynamic Entity resolution
+    entity_res = resolve_entity(
+        raw_name=candidate.entity_name,
         entity_type=candidate.entity_type,
-        aliases=[candidate.entity_name] if candidate.entity_name != canon_entity_name else [],
+        context=candidate.evidence_quote,
+        repo=repo,
+    )
+    entity = Entity(
+        id=entity_res.canonical_entity_id,
+        canonical_name=entity_res.canonical_name,
+        entity_type=entity_res.entity_type or candidate.entity_type,
+        aliases=[candidate.entity_name] if candidate.entity_name != entity_res.canonical_name else [],
     )
 
-    # Concept canonicalization
-    canon_concept_name = canonicalize_concept_name(candidate.concept_name)
+    # Dynamic Concept resolution
+    concept_res = resolve_concept(
+        raw_name=candidate.concept_name,
+        source_label=candidate.source_label,
+        context=candidate.evidence_quote,
+        unit=candidate.unit,
+        repo=repo,
+    )
     concept = Concept(
-        canonical_name=canon_concept_name,
+        id=concept_res.canonical_concept_id,
+        canonical_name=concept_res.canonical_name,
         source_label=candidate.source_label or candidate.concept_name,
+        definition=concept_res.explanation,
     )
 
     # FactValue creation and normalization
@@ -229,6 +250,15 @@ def process_extracted_candidate(
     if grounding_reasons:
         needs_review = True
         review_reasons.extend(grounding_reasons)
+
+    # Dynamic resolution ambiguity checks
+    if entity_res.status == ResolutionStatus.AMBIGUOUS:
+        needs_review = True
+        review_reasons.append(f"Ambiguous entity resolution: {entity_res.explanation or candidate.entity_name}")
+
+    if concept_res.status == ResolutionStatus.AMBIGUOUS:
+        needs_review = True
+        review_reasons.append(f"Ambiguous concept resolution: {concept_res.explanation or candidate.concept_name}")
 
     # Dimensionless metrics (indices, scores, rankings, ratios, statistical moments)
     # do not have units and should not be flagged for missing units
