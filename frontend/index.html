@@ -8,485 +8,361 @@
   <meta name="description"
     content="Evidence-grounded financial knowledge extraction, unit normalization, and rules-first deterministic reconciliation engine." />
 
-  <!-- Modern Google Fonts -->
+  <!-- Modern Typography -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
-    href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
     rel="stylesheet">
 
   <link rel="stylesheet" href="./style.css" />
 </head>
 
-<body class="dark-theme">
+<body>
   <!-- Top Navigation / Header -->
   <header class="app-header">
     <div class="header-container">
       <div class="brand">
         <div class="brand-logo">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
-            stroke-linecap="round" stroke-linejoin="round">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
           </svg>
         </div>
         <div>
           <div class="brand-title">Financial Fact Knowledge Layer</div>
-          <div class="brand-subtitle">Rules-First Reconciliation Engine &amp; Evidence Grounding</div>
+          <div class="brand-subtitle">Rules-First Reconciliation &amp; Citation Grounding</div>
         </div>
       </div>
 
       <div class="header-controls">
         <div class="api-status-badge" id="apiStatusBadge">
           <span class="status-dot"></span>
-          <span id="apiStatusText">Connecting...</span>
+          <span id="apiStatusText">Engine Ready</span>
         </div>
+
         <input type="file" id="pdfFileInput" accept=".pdf" style="display:none;" onchange="handlePDFUpload(event)" />
-        <button class="btn" style="background: rgba(255, 255, 255, 0.08); color: #fff;" onclick="document.getElementById('pdfFileInput').click()">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        
+        <button class="btn btn-secondary" id="btnUploadNav" onclick="document.getElementById('pdfFileInput').click()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="17 8 12 3 7 8"></polyline>
             <line x1="12" y1="3" x2="12" y2="15"></line>
           </svg>
-          Upload PDF
+          Upload Filing
         </button>
-        <button class="btn btn-primary" id="btnRunReconcile" onclick="triggerReconcile()">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-            stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <polyline points="1 20 1 14 7 14"></polyline>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+
+        <button class="btn btn-ghost" id="btnClearData" onclick="confirmClearWorkspace()" title="Reset workspace and remove processed files">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
           </svg>
-          Re-Run Reconciliation
+          Clear
         </button>
       </div>
     </div>
   </header>
 
-  <!-- Main Container -->
+  <!-- Main View Container -->
   <main class="main-container">
-    <!-- Quick Metrics Overview -->
-    <section class="metrics-grid" id="metricsOverview">
-      <div class="metric-card">
-        <div class="metric-icon doc-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-            <polyline points="14 2 14 8 20 8"></polyline>
-            <line x1="16" y1="13" x2="8" y2="13"></line>
-            <line x1="16" y1="17" x2="8" y2="17"></line>
-            <polyline points="10 9 9 9 8 9"></polyline>
-          </svg>
-        </div>
-        <div>
-          <div class="metric-value" id="statDocCount">6</div>
-          <div class="metric-label">Grounded Filings</div>
-        </div>
-      </div>
 
-      <div class="metric-card">
-        <div class="metric-icon obs-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <polyline points="12 6 12 12 14 14"></polyline>
-          </svg>
-        </div>
-        <div>
-          <div class="metric-value" id="statObsCount">12</div>
-          <div class="metric-label">Atomic Observations</div>
-        </div>
-      </div>
-
-      <div class="metric-card">
-        <div class="metric-icon corr-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-            <polyline points="22 4 12 14.01 9 11.01"></polyline>
-          </svg>
-        </div>
-        <div>
-          <div class="metric-value" id="statCorrCount">3</div>
-          <div class="metric-label">Corroborated</div>
-        </div>
-      </div>
-
-      <div class="metric-card">
-        <div class="metric-icon cont-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="15" y1="9" x2="9" y2="15"></line>
-            <line x1="9" y1="9" x2="15" y2="15"></line>
-          </svg>
-        </div>
-        <div>
-          <div class="metric-value" id="statContCount">1</div>
-          <div class="metric-label">Contradicted</div>
-        </div>
-      </div>
-
-      <div class="metric-card">
-        <div class="metric-icon ctx-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path
-              d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
-            </path>
-          </svg>
-        </div>
-        <div>
-          <div class="metric-value" id="statCtxCount">3</div>
-          <div class="metric-label">Contextualized</div>
-        </div>
-      </div>
-
-      <div class="metric-card">
-        <div class="metric-icon rev-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-            <line x1="12" y1="9" x2="12" y2="13"></line>
-            <line x1="12" y1="17" x2="12.01" y2="17"></line>
-          </svg>
-        </div>
-        <div>
-          <div class="metric-value" id="statReviewCount">1</div>
-          <div class="metric-label">Needs Review</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Navigation Tabs (Matching Section 33 Core Views) -->
-    <nav class="tabs-nav" id="mainTabs">
-      <button class="tab-btn active" data-tab="showcaseTab" onclick="switchTab('showcaseTab')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-        </svg>
-        Required Cases
-      </button>
-      <button class="tab-btn" data-tab="documentsTab" onclick="switchTab('documentsTab')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-          <polyline points="14 2 14 8 20 8"></polyline>
-          <line x1="16" y1="13" x2="8" y2="13"></line>
-          <line x1="16" y1="17" x2="8" y2="17"></line>
-        </svg>
-        Documents
-      </button>
-      <button class="tab-btn" data-tab="factsTab" onclick="switchTab('factsTab')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-          <line x1="9" y1="3" x2="9" y2="21"></line>
-        </svg>
-        Canonical Facts
-      </button>
-      <button class="tab-btn" data-tab="observationsTab" onclick="switchTab('observationsTab')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="8" y1="6" x2="21" y2="6"></line>
-          <line x1="8" y1="12" x2="21" y2="12"></line>
-          <line x1="8" y1="18" x2="21" y2="18"></line>
-          <line x1="3" y1="6" x2="3.01" y2="6"></line>
-          <line x1="3" y1="12" x2="3.01" y2="12"></line>
-          <line x1="3" y1="18" x2="3.01" y2="18"></line>
-        </svg>
-        Atomic Observations
-      </button>
-      <button class="tab-btn" data-tab="relationshipsTab" onclick="switchTab('relationshipsTab')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="18" cy="5" r="3"></circle>
-          <circle cx="6" cy="12" r="3"></circle>
-          <circle cx="18" cy="19" r="3"></circle>
-          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
-          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
-        </svg>
-        Relationships
-      </button>
-      <button class="tab-btn" data-tab="needsReviewTab" onclick="switchTab('needsReviewTab')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-          <line x1="12" y1="9" x2="12" y2="13"></line>
-          <line x1="12" y1="17" x2="12.01" y2="17"></line>
-        </svg>
-        Needs Review
-      </button>
-      <button class="tab-btn" data-tab="observabilityTab" onclick="switchTab('observabilityTab')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-        </svg>
-        Observability
-      </button>
-      <button class="tab-btn" data-tab="liveExtractTab" onclick="switchTab('liveExtractTab')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-          <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-          <line x1="12" y1="22.08" x2="12" y2="12"></line>
-        </svg>
-        Live LLM Studio
-      </button>
-    </nav>
-
-    <!-- TAB 1: 4 CORE SHOWCASE CASES -->
-    <section class="tab-content active" id="showcaseTab">
-      <div class="section-intro">
-        <h2>Evaluator Showcase: 4 Critical Reconciliation Cases</h2>
-        <p>Direct demonstration of the rules-first deterministic cascade on Delhivery and Indian Macroeconomy filings.
+    <!-- STATE 1: Landing / Ingestion View (Displayed when 0 filings are processed) -->
+    <section class="landing-view" id="landingView">
+      <div class="hero-container">
+        <div class="hero-badge">Evidence-Grounded Knowledge Engine</div>
+        <h1 class="hero-title">Deterministic Financial Fact Reconciliation</h1>
+        <p class="hero-description">
+          Upload PDF filings to extract atomic observations, normalize financial units and fiscal periods, and reconcile claims across filings via a rules-first deterministic cascade.
         </p>
-      </div>
 
-      <div class="showcase-selector-grid" id="showcaseSelectorGrid">
-        <!-- Injected via JavaScript -->
-      </div>
-
-      <!-- Active Showcase Interactive Inspector -->
-      <div class="showcase-inspector-panel" id="showcaseInspector">
-        <!-- Injected via JavaScript -->
-      </div>
-    </section>
-
-    <!-- TAB: DOCUMENTS EXPLORER -->
-    <section class="tab-content" id="documentsTab">
-      <div class="section-intro">
-        <h2>Source Filings &amp; Document Classification</h2>
-        <p>Inferred metadata and layout properties across the starter dataset PDFs (Section 2 &amp; 33).</p>
-      </div>
-
-      <div class="architecture-diagram-card" style="margin-bottom: 1.5rem; text-align: center; border-style: dashed; padding: 1.5rem; cursor: pointer; background: rgba(99,102,241,0.05);" onclick="document.getElementById('pdfFileInput').click()">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent-primary); margin-bottom: 0.35rem;">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-          <polyline points="17 8 12 3 7 8"></polyline>
-          <line x1="12" y1="3" x2="12" y2="15"></line>
-        </svg>
-        <h4 style="font-size: 0.95rem;">Upload PDF Document for Synchronous Ingestion (§5 &amp; §11)</h4>
-        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">Click to upload any financial PDF filing. The pipeline will synchronously chunk, extract atomic observations, normalize values, and evaluate relationships.</p>
-      </div>
-
-      <div class="observations-grid" id="documentsGrid">
-        <!-- Injected via JS -->
-      </div>
-    </section>
-
-    <!-- TAB: CANONICAL FACTS (§2 & §12) -->
-    <section class="tab-content" id="factsTab">
-      <div class="section-intro">
-        <h2>Canonical Facts (Grouped Observations)</h2>
-        <p>A "Fact" in the UI represents a grouped set of observations sharing canonical entity and concept. Expand any fact to view its underlying claims, verbatim quotes, and pairwise reconciliation status.</p>
-      </div>
-
-      <div class="filter-bar">
-        <div class="filter-group">
-          <label>Filter by Status:</label>
-          <select id="factFilterStatus" onchange="filterFacts()">
-            <option value="all">All Facts</option>
-            <option value="corroborated">Corroborated</option>
-            <option value="contradicted">Contradicted</option>
-            <option value="contextualized">Contextualized</option>
-            <option value="single_source">Single Source</option>
-            <option value="needs_review">Needs Review</option>
-          </select>
-        </div>
-        <div class="search-group">
-          <input type="text" id="factSearchInput" placeholder="Search by entity or metric..." onkeyup="filterFacts()" />
-        </div>
-      </div>
-
-      <div class="relationships-list" id="factsList">
-        <!-- Injected via JS -->
-      </div>
-    </section>
-
-    <!-- TAB 2: RECONCILIATION MATRIX -->
-    <section class="tab-content" id="relationshipsTab">
-      <div class="section-intro">
-        <h2>Reconciliation Knowledge Graph</h2>
-        <p>All pairwise observation comparisons evaluated by the deterministic cascade and semantic judge.</p>
-      </div>
-
-      <div class="filter-bar">
-        <div class="filter-group">
-          <label>Filter Type:</label>
-          <select id="relTypeFilter" onchange="filterRelationships()">
-            <option value="all">All Relationships</option>
-            <option value="corroborated">Corroborated</option>
-            <option value="contradicted">Contradicted</option>
-            <option value="contextualized">Contextualized</option>
-            <option value="unresolved">Unresolved</option>
-          </select>
-        </div>
-        <div class="search-group">
-          <input type="text" id="relSearchInput" placeholder="Search entity, concept, or reasons..."
-            onkeyup="filterRelationships()" />
-        </div>
-      </div>
-
-      <div class="relationships-list" id="relationshipsList">
-        <!-- Injected via JS -->
-      </div>
-    </section>
-
-    <!-- TAB 3: GROUNDED OBSERVATIONS -->
-    <section class="tab-content" id="observationsTab">
-      <div class="section-intro">
-        <h2>Atomic Extracted Claims (Observations)</h2>
-        <p>Each observation represents a single standardized claim strictly anchored to an exact PDF excerpt.</p>
-      </div>
-
-      <div class="filter-bar">
-        <div class="filter-group">
-          <label>Filter by Status:</label>
-          <select id="obsFilterStatus" onchange="filterObservations()">
-            <option value="all">All Observations</option>
-            <option value="review_only">Needs Review Only</option>
-            <option value="actual">Actuals Only</option>
-            <option value="estimate">Estimates / Forecasts Only</option>
-          </select>
-        </div>
-        <div class="search-group">
-          <input type="text" id="obsSearchInput" placeholder="Search by entity name or metric..."
-            onkeyup="filterObservations()" />
-        </div>
-      </div>
-
-      <div class="observations-grid" id="observationsGrid">
-        <!-- Injected via JS -->
-      </div>
-    </section>
-
-    <!-- TAB: NEEDS REVIEW (QUARANTINE QUEUE) -->
-    <section class="tab-content" id="needsReviewTab">
-      <div class="section-intro">
-        <h2>Needs Review (Quarantine Queue)</h2>
-        <p>Observations flagged for unreliable units, missing timeframe anchors, or low confidence. These are quarantined and barred from candidate matching to prevent graph contamination (Section 26).</p>
-      </div>
-
-      <div class="observations-grid" id="needsReviewGrid">
-        <!-- Injected via JS -->
-      </div>
-    </section>
-
-    <!-- TAB 4: PIPELINE OBSERVABILITY -->
-    <section class="tab-content" id="observabilityTab">
-      <div class="section-intro">
-        <h2>Ingestion Pipeline &amp; Audit Trail</h2>
-        <p>Execution logs and observability metrics across PDF parsing, chunking, extraction, normalization, and
-          reconciliation.</p>
-      </div>
-
-      <div class="architecture-diagram-card">
-        <h3>System Architecture &amp; Decision Flow</h3>
-        <div class="flow-steps">
-          <div class="flow-step">
-            <div class="step-badge">1</div>
-            <h4>PDF Parser</h4>
-            <p>100-page excerpting, page preservation, text &amp; table chunking</p>
+        <!-- Document Drop Zone -->
+        <div class="upload-dropzone" id="dropZone" onclick="document.getElementById('pdfFileInput').click()">
+          <div class="upload-icon-wrapper">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="12" y1="18" x2="12" y2="12"></line>
+              <line x1="9" y1="15" x2="15" y2="15"></line>
+            </svg>
           </div>
-          <div class="flow-arrow">→</div>
-          <div class="flow-step">
-            <div class="step-badge">2</div>
-            <h4>LLM Extraction</h4>
-            <p>Candidate claims, source quote, page locator, status</p>
-          </div>
-          <div class="flow-arrow">→</div>
-          <div class="flow-step">
-            <div class="step-badge">3</div>
-            <h4>Normalization</h4>
-            <p>Unit multipliers (Cr/Mn), % preservation, canonical aliases</p>
-          </div>
-          <div class="flow-arrow">→</div>
-          <div class="flow-step">
-            <div class="step-badge">4</div>
-            <h4>Deterministic Cascade</h4>
-            <p>Entity → Concept → Scope → Time → Materiality (0.1%)</p>
-          </div>
-          <div class="flow-arrow">→</div>
-          <div class="flow-step">
-            <div class="step-badge">5</div>
-            <h4>LLM Judge Fallback</h4>
-            <p>Structured JSON fallback when rules conclude None</p>
+          <div class="upload-text-main">Click or drop a financial PDF filing here</div>
+          <div class="upload-text-sub">Supports Annual Reports, IPO Prospectuses, Earnings Presentations &amp; Macroeconomic Excerpts</div>
+          <div class="upload-btn-wrapper">
+            <span class="btn btn-primary btn-sm">Select PDF File</span>
           </div>
         </div>
-      </div>
 
-      <div class="runs-container">
-        <h3>Processing Run History (<code>processing_runs</code> table)</h3>
-        <div class="runs-list" id="runsList">
-          <!-- Injected via JS -->
+        <!-- Quick Starter Filings Selection -->
+        <div class="starter-section">
+          <div class="starter-title">Or test instantly with starter repository filings:</div>
+          <div class="starter-grid" id="starterGrid">
+            <div class="starter-card-loading">Loading starter filings...</div>
+          </div>
+        </div>
+
+        <!-- Engine Principles Grid -->
+        <div class="principles-grid">
+          <div class="principle-card">
+            <div class="principle-number">01</div>
+            <div class="principle-title">Evidence Grounding</div>
+            <div class="principle-desc">Every extracted observation preserves its exact page number, section context, and verbatim quotation.</div>
+          </div>
+          <div class="principle-card">
+            <div class="principle-number">02</div>
+            <div class="principle-title">Deterministic Normalizer</div>
+            <div class="principle-desc">Bridges scale multipliers (₹ Cr vs ₹ Mn, Lakhs, Billions) and Indian Fiscal Years without LLM hallucinations.</div>
+          </div>
+          <div class="principle-card">
+            <div class="principle-number">03</div>
+            <div class="principle-title">Rules-First Cascade</div>
+            <div class="principle-desc">Strict deterministic matching gates for entity, concept, scope, and vintage before any LLM arbitration fallback.</div>
+          </div>
+          <div class="principle-card">
+            <div class="principle-number">04</div>
+            <div class="principle-title">Quarantine Defense</div>
+            <div class="principle-desc">Incomplete claims with missing timeframes or ambiguous units are quarantined to prevent corrupted consensus.</div>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- TAB 5: LIVE LLM STUDIO -->
-    <section class="tab-content" id="liveExtractTab">
-      <div class="section-intro">
-        <h2>Live LLM Extraction &amp; Reconciliation Studio</h2>
-        <p>Directly test live LLM fact extraction and reconciliation with Google Gemini or OpenAI, grounded in source quotes.</p>
-      </div>
-
-      <!-- LLM Configuration Panel -->
-      <div class="architecture-diagram-card" style="margin-bottom: 1.5rem;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
-          <div>
-            <h3 style="margin-bottom: 0.25rem;">LLM Provider Configuration</h3>
-            <span id="llmStatusIndicator" style="font-size: 0.82rem; color: var(--text-muted);">Detecting credentials...</span>
+    <!-- STATE 2: Knowledge Dashboard (Revealed once filings are processed) -->
+    <section class="dashboard-view" id="dashboardView" style="display: none;">
+      
+      <!-- Metrics Strip (Values calculated dynamically) -->
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-label">Grounded Filings</span>
+            <span class="metric-badge">Docs</span>
           </div>
-          <div style="display: flex; gap: 0.5rem; align-items: center;">
-            <select id="llmProviderSelect" style="background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); padding: 0.4rem 0.75rem; border-radius: 6px;">
-              <option value="gemini">Google Gemini</option>
-              <option value="openai">OpenAI (GPT-4o-mini)</option>
-            </select>
-            <input type="password" id="llmApiKeyInput" placeholder="Paste API Key (optional)" style="background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); padding: 0.4rem 0.75rem; border-radius: 6px; width: 220px;" />
-            <button class="btn btn-primary" onclick="saveLLMKey()" style="padding: 0.4rem 0.85rem; font-size: 0.82rem;">Save Key</button>
-          </div>
-        </div>
-        <p style="font-size: 0.78rem; color: var(--text-dim);">
-          * Zero external credentials required to run. When no key is provided, the engine automatically uses an offline heuristic parser and the pre-computed ground-truth knowledge base.
-        </p>
-      </div>
-
-      <!-- Live Interactive Extraction Form -->
-      <div class="showcase-inspector-panel">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-          <h4>Input Text / Document Excerpt</h4>
-          <div style="display: flex; gap: 0.5rem;">
-            <button class="btn" style="background: rgba(255,255,255,0.06); color:#cbd5e1; font-size:0.75rem;" onclick="loadPresetText('delhivery')">Load Delhivery Excerpt</button>
-            <button class="btn" style="background: rgba(255,255,255,0.06); color:#cbd5e1; font-size:0.75rem;" onclick="loadPresetText('gdp')">Load Macro GDP Excerpt</button>
-          </div>
+          <div class="metric-value" id="statDocCount">0</div>
+          <div class="metric-sub" id="statDocSub">Processed to disk</div>
         </div>
 
-        <textarea id="liveExtractTextarea" rows="5" style="width: 100%; background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); border-radius: 8px; padding: 0.85rem; font-family: var(--font-mono); font-size: 0.85rem; resize: vertical;" placeholder="Paste text from any financial or macroeconomic report..."></textarea>
-
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
-          <div style="display: flex; gap: 1rem; font-size: 0.82rem; color: var(--text-muted);">
-            <span>Page Number: <input type="number" id="liveExtractPage" value="1" style="width: 55px; background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 0.2rem 0.4rem;" /></span>
-            <span>Document ID: <input type="text" id="liveExtractDocId" value="live_filing_input" style="width: 140px; background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 0.2rem 0.4rem;" /></span>
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-label">Atomic Observations</span>
+            <span class="metric-badge">Claims</span>
           </div>
-          <button class="btn btn-primary" id="btnLiveExtract" onclick="runLiveExtraction()">
-            Extract Grounded Observations &amp; Reconcile
+          <div class="metric-value" id="statObsCount">0</div>
+          <div class="metric-sub">Normalized &amp; grounded</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-label">Corroborated</span>
+            <span class="metric-badge badge-corroborated">Consensus</span>
+          </div>
+          <div class="metric-value text-corroborated" id="statCorrCount">0</div>
+          <div class="metric-sub">&lt; 0.1% materiality</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-label">Contradicted</span>
+            <span class="metric-badge badge-contradicted">Divergent</span>
+          </div>
+          <div class="metric-value text-contradicted" id="statContCount">0</div>
+          <div class="metric-sub">Same vintage &amp; scope</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-label">Contextualized</span>
+            <span class="metric-badge badge-contextualized">Nuance</span>
+          </div>
+          <div class="metric-value text-contextualized" id="statCtxCount">0</div>
+          <div class="metric-sub">Estimate vs projection</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-label">Quarantine Audit</span>
+            <span class="metric-badge badge-review">Review</span>
+          </div>
+          <div class="metric-value text-review" id="statReviewCount">0</div>
+          <div class="metric-sub">Missing unit / period</div>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <div class="dashboard-tabs-bar">
+        <div class="tabs-group">
+          <button class="tab-btn active" data-tab="showcaseTab" onclick="switchTab('showcaseTab')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+            </svg>
+            Showcase Inspector
+          </button>
+          <button class="tab-btn" data-tab="factsTab" onclick="switchTab('factsTab')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            </svg>
+            Canonical Facts
+          </button>
+          <button class="tab-btn" data-tab="observationsTab" onclick="switchTab('observationsTab')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            Atomic Claims
+          </button>
+          <button class="tab-btn" data-tab="relationshipsTab" onclick="switchTab('relationshipsTab')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="18" cy="5" r="3"></circle>
+              <circle cx="6" cy="12" r="3"></circle>
+              <circle cx="18" cy="19" r="3"></circle>
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+            </svg>
+            Relationships
+          </button>
+          <button class="tab-btn" data-tab="documentsTab" onclick="switchTab('documentsTab')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+            Filings
+          </button>
+          <button class="tab-btn" data-tab="needsReviewTab" onclick="switchTab('needsReviewTab')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            Quarantine Queue
           </button>
         </div>
 
-        <!-- Live Extraction Results Container -->
-        <div id="liveExtractResults" style="margin-top: 1.5rem; display: none;">
-          <!-- Injected dynamically -->
+        <div class="tabs-actions">
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('pdfFileInput').click()">
+            + Ingest Another PDF
+          </button>
         </div>
       </div>
+
+      <!-- TAB 1: Showcase Inspector -->
+      <div class="tab-content active" id="showcaseTab">
+        <div class="showcase-layout">
+          <div class="showcase-sidebar">
+            <div class="section-title">Evaluation Cases</div>
+            <div class="showcase-selector-list" id="showcaseSelectorGrid"></div>
+          </div>
+          <div class="showcase-main">
+            <div class="inspector-panel" id="showcaseInspector"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: Canonical Facts -->
+      <div class="tab-content" id="factsTab">
+        <div class="tab-header-strip">
+          <div>
+            <div class="section-title">Canonical Facts Consensus</div>
+            <div class="section-subtitle">Facts grouped by entity &amp; concept across all processed filings.</div>
+          </div>
+        </div>
+        <div class="cards-list" id="factsList"></div>
+      </div>
+
+      <!-- TAB 3: Atomic Claims -->
+      <div class="tab-content" id="observationsTab">
+        <div class="tab-header-strip">
+          <div>
+            <div class="section-title">Atomic Extracted Observations</div>
+            <div class="section-subtitle">Extracted claims with reported units, normalized base values, and citation anchors.</div>
+          </div>
+          <div class="filter-controls">
+            <input type="text" class="input-search" id="obsSearchInput" placeholder="Filter claims..." oninput="filterObservations()" />
+            <select class="select-filter" id="obsFilterStatus" onchange="filterObservations()">
+              <option value="all">All Assertions</option>
+              <option value="actual">Actual Only</option>
+              <option value="estimate">Estimate / Forecast</option>
+              <option value="review_only">Needs Review Only</option>
+            </select>
+          </div>
+        </div>
+        <div class="data-grid" id="observationsGrid"></div>
+      </div>
+
+      <!-- TAB 4: Relationships -->
+      <div class="tab-content" id="relationshipsTab">
+        <div class="tab-header-strip">
+          <div>
+            <div class="section-title">Reconciliation Graph Relationships</div>
+            <div class="section-subtitle">Deterministic cascade verdicts computed between candidate observation pairs.</div>
+          </div>
+          <div class="filter-controls">
+            <input type="text" class="input-search" id="relSearchInput" placeholder="Search relationships..." oninput="filterRelationships()" />
+            <select class="select-filter" id="relTypeFilter" onchange="filterRelationships()">
+              <option value="all">All Verdicts</option>
+              <option value="corroborates">Corroborates</option>
+              <option value="contradicts">Contradicts</option>
+              <option value="contextualizes">Contextualizes</option>
+            </select>
+          </div>
+        </div>
+        <div class="cards-list" id="relationshipsList"></div>
+      </div>
+
+      <!-- TAB 5: Filings -->
+      <div class="tab-content" id="documentsTab">
+        <div class="tab-header-strip">
+          <div>
+            <div class="section-title">Grounded Filing Documents</div>
+            <div class="section-subtitle">Source PDF filings, parsed chunks, and persistent processed artifacts.</div>
+          </div>
+        </div>
+        <div class="data-grid" id="documentsGrid"></div>
+      </div>
+
+      <!-- TAB 6: Quarantine Queue -->
+      <div class="tab-content" id="needsReviewTab">
+        <div class="tab-header-strip">
+          <div>
+            <div class="section-title">Quarantined Claims for Audit</div>
+            <div class="section-subtitle">Claims blocked from auto-reconciliation due to missing units or ambiguous timeframes.</div>
+          </div>
+        </div>
+        <div class="data-grid" id="needsReviewGrid"></div>
+      </div>
+
     </section>
+
   </main>
 
-  <!-- Evidence Inspector Modal Drawer -->
-  <div class="modal-backdrop" id="evidenceModal" onclick="closeEvidenceModal(event)">
-    <div class="modal-dialog" onclick="event.stopPropagation()">
+  <!-- Processing Progress Modal -->
+  <div class="modal-backdrop" id="processingModal">
+    <div class="modal-card">
       <div class="modal-header">
-        <h3 id="modalTitle">Evidence Inspector</h3>
-        <button class="modal-close" onclick="closeEvidenceModal()">&times;</button>
+        <div class="spinner"></div>
+        <div>
+          <div class="modal-title" id="procModalTitle">Ingesting Filing...</div>
+          <div class="modal-subtitle" id="procModalFilename">Processing document pipeline</div>
+        </div>
       </div>
-      <div class="modal-body" id="modalBody">
-        <!-- Injected dynamically -->
+      <div class="stepper-list">
+        <div class="stepper-item active" id="step1">
+          <span class="step-bullet">1</span>
+          <span class="step-text">Layout-Aware PDF Parsing &amp; Table Chunking</span>
+        </div>
+        <div class="stepper-item" id="step2">
+          <span class="step-bullet">2</span>
+          <span class="step-text">Atomic Claim Extraction &amp; Unit Normalization</span>
+        </div>
+        <div class="stepper-item" id="step3">
+          <span class="step-bullet">3</span>
+          <span class="step-text">Deterministic Rules Cascade Reconciliation</span>
+        </div>
+        <div class="stepper-item" id="step4">
+          <span class="step-bullet">4</span>
+          <span class="step-text">Saving Processed JSON Artifact to <code>processed/</code></span>
+        </div>
       </div>
     </div>
   </div>
-
-  <footer class="app-footer">
-    <div class="footer-container">
-      <span>Financial Fact Knowledge Layer &bull; Developed with Python, FastAPI, SQLite &amp; Vanilla Web
-        Technologies</span>
-      <span class="footer-hint">Press 1-4 to quickly cycle showcase demo cases</span>
-    </div>
-  </footer>
 
   <script src="./app.js"></script>
 </body>

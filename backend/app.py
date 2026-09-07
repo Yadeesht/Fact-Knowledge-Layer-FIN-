@@ -39,8 +39,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
-UPLOADS_DIR = Path(__file__).resolve().parent.parent / "data" / "uploads"
+# Load environment variables from .env
+ROOT_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = ROOT_DIR / ".env"
+if ENV_FILE.exists():
+    with open(ENV_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"\''))
+
+HOST = os.getenv("HOST", "127.0.0.1")
+PORT = int(os.getenv("PORT", 8000))
+FRONTEND_DIR = ROOT_DIR / "frontend"
+UPLOADS_DIR = ROOT_DIR / os.getenv("UPLOADS_DIR", "data/uploads")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 ensure_processed_dir()
 
@@ -60,6 +73,18 @@ def startup_event():
 @app.get("/api/health")
 def health_check():
     return {"status": "ok", "service": "financial-fact-knowledge-layer"}
+
+
+@app.get("/api/config")
+def get_app_config():
+    return {
+        "host": HOST,
+        "port": PORT,
+        "processed_dir": os.getenv("PROCESSED_DIR", "processed"),
+        "database_path": os.getenv("DATABASE_PATH", "backend/data/knowledge.db"),
+        "uploads_dir": str(UPLOADS_DIR.relative_to(ROOT_DIR)),
+    }
+
 
 
 # -------------------------------------------------------------
@@ -86,6 +111,77 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
     finally:
         repo.close()
+
+
+class StarterIngestRequest(BaseModel):
+
+    filename: str
+
+
+@app.get("/api/starter-files")
+def list_starter_files():
+    base_dir = Path(__file__).resolve().parent.parent
+    starters = []
+    for folder in ["delhivery", "india-macroeconomy"]:
+        p = base_dir / folder
+        if p.exists():
+            for f in p.glob("*.pdf"):
+                starters.append({
+                    "filename": f.name,
+                    "dataset": folder,
+                    "size_mb": round(f.stat().st_size / (1024 * 1024), 2),
+                })
+    return starters
+
+
+@app.post("/api/ingest-starter")
+def ingest_starter_file(req: StarterIngestRequest):
+    """
+    Ingest one of the starter PDF files located in delhivery/ or india-macroeconomy/.
+    """
+    base_dir = Path(__file__).resolve().parent.parent
+    potential_paths = [
+        base_dir / "delhivery" / req.filename,
+        base_dir / "india-macroeconomy" / req.filename,
+    ]
+    target_path = None
+    for p in potential_paths:
+        if p.exists():
+            target_path = p
+            break
+
+    if not target_path:
+        raise HTTPException(status_code=404, detail=f"Starter file {req.filename} not found.")
+
+    dataset = "delhivery" if "delhivery" in str(target_path).lower() else "india-macroeconomy"
+    repo = Repository()
+    try:
+        result = process_pdf_document(pdf_path=target_path, filename=req.filename, dataset=dataset, repo=repo)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+    finally:
+        repo.close()
+
+
+@app.post("/api/clear")
+def clear_all_data_endpoint():
+    """
+    Clears all database tables and removes processed JSON artifacts.
+    """
+    repo = Repository()
+    try:
+        repo.clear_all_data()
+        for f in PROCESSED_DIR.glob("*.json"):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+        return {"status": "success", "message": "All processed data cleared."}
+    finally:
+        repo.close()
+
+
 
 
 @app.get("/documents")

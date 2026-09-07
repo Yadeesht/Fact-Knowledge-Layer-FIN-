@@ -2,7 +2,9 @@ import sqlite3
 import os
 from pathlib import Path
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "knowledge.db"
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+DEFAULT_DB_PATH = ROOT_DIR / os.getenv("DATABASE_PATH", "backend/data/knowledge.db")
+
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS documents (

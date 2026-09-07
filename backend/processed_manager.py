@@ -5,7 +5,9 @@ from typing import Dict, Any, List
 from backend.models.schema import Observation, Relationship
 from backend.db.repository import Repository
 
-PROCESSED_DIR = Path(__file__).resolve().parent.parent / "processed"
+ROOT_DIR = Path(__file__).resolve().parent.parent
+PROCESSED_DIR = ROOT_DIR / os.getenv("PROCESSED_DIR", "processed")
+
 
 
 def ensure_processed_dir() -> Path:

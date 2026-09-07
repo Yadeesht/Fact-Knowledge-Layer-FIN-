@@ -1,0 +1,31 @@
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local SQLite databases & uploads
+*.db
+*.sqlite
+*.sqlite3
+data/uploads/*
+!data/uploads/.gitkeep
+backend/data/*.db
+
+# OS Files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Editor configurations
+.vscode/
+.idea/
+*.swp
