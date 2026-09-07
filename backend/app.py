@@ -1,5 +1,6 @@
 import os
 import shutil
+import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File
@@ -184,6 +185,39 @@ def clear_all_data_endpoint():
 
 
 
+@app.get("/api/processed-files")
+def list_processed_files():
+    """
+    Returns metadata for all files currently saved in the processed/ folder.
+    Allows frontend on startup to see already-processed filings and switch between them.
+    """
+    ensure_processed_dir()
+    files = []
+    for p in PROCESSED_DIR.glob("*.json"):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            doc = data.get("document", {})
+            obs = data.get("observations", [])
+            rels = data.get("relationships", [])
+            chunks = data.get("chunks", [])
+            files.append({
+                "doc_id": doc.get("id", p.stem),
+                "filename": doc.get("filename", p.name),
+                "dataset": doc.get("dataset", "processed"),
+                "document_type": doc.get("document_type", "pdf"),
+                "page_count": doc.get("page_count", 0),
+                "chunks_count": len(chunks),
+                "observations_count": len(obs),
+                "relationships_count": len(rels),
+                "created_at": doc.get("created_at", ""),
+                "json_file": p.name,
+            })
+        except Exception as e:
+            print(f"Error loading processed file {p.name}: {e}")
+    return sorted(files, key=lambda x: x.get("created_at", ""), reverse=True)
+
+
 @app.get("/documents")
 @app.get("/api/documents")
 def get_documents():
@@ -224,18 +258,25 @@ def get_observations(
     entity: Optional[str] = None,
     concept: Optional[str] = None,
     needs_review: Optional[bool] = None,
+    document_id: Optional[str] = None,
 ):
     """
-    GET /observations (§11): Filterable by entity, concept, needs_review.
+    GET /observations (§11): Filterable by entity, concept, needs_review, document_id.
     """
     repo = Repository()
     try:
         obs_list = repo.list_observations(
             entity_name=entity, concept_name=concept, needs_review=needs_review
         )
+        if document_id and document_id != "all":
+            obs_list = [
+                o for o in obs_list
+                if any(ev.document_id == document_id for ev in (o.evidence or []))
+            ]
         return [o.dict() for o in obs_list]
     finally:
         repo.close()
+
 
 
 @app.get("/observations/{obs_id}")

@@ -47,9 +47,10 @@ def get_llm_credentials() -> Dict[str, Optional[str]]:
 def call_gemini_api(prompt: str, api_key: str, system_instruction: Optional[str] = None) -> str:
     """
     Direct HTTP call to Gemini API using standard library urllib (no heavy external SDK required).
-    Uses gemini-1.5-flash or gemini-2.0-flash with JSON mode.
+    Uses model specified in EXTRACTOR_MODEL environment variable (default: gemini-1.5-flash).
     """
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    model = os.getenv("EXTRACTOR_MODEL", "gemini-1.5-flash")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
     payload: Dict[str, Any] = {
         "contents": [
@@ -90,6 +91,7 @@ def call_openai_api(prompt: str, api_key: str, system_instruction: Optional[str]
     """
     Direct HTTP call to OpenAI chat completion API.
     """
+    model = os.getenv("EXTRACTOR_MODEL", "gpt-4o-mini")
     url = "https://api.openai.com/v1/chat/completions"
     messages = []
     if system_instruction:
@@ -97,11 +99,12 @@ def call_openai_api(prompt: str, api_key: str, system_instruction: Optional[str]
     messages.append({"role": "user", "content": prompt})
 
     payload = {
-        "model": "gpt-4o-mini",
+        "model": model,
         "messages": messages,
         "temperature": 0.1,
         "response_format": {"type": "json_object"},
     }
+
 
     req = urllib.request.Request(
         url,

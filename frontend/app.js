@@ -2,9 +2,6 @@
 // Financial Fact Knowledge Layer - Frontend Controller
 // ==========================================================================
 
-// Dynamic API Base URL resolution:
-// Automatically detects and resolves http://127.0.0.1:8000, http://localhost:8000,
-// or same-origin regardless of whether opened via file://, VS Code Live Server, or FastAPI.
 let API_BASE = (window.location.protocol === "file:" || (window.location.port && window.location.port !== "8000"))
   ? "http://127.0.0.1:8000"
   : "";
@@ -14,11 +11,14 @@ function api(path) {
 }
 
 let allDocuments = [];
+let processedFiles = [];
 let allObservations = [];
 let allRelationships = [];
 let allFacts = [];
 let showcaseData = [];
 let activeCaseIndex = 0;
+let currentDocFilter = "all";
+let currentView = "landing"; // Default starting page is ALWAYS upload doc
 
 document.addEventListener("DOMContentLoaded", () => {
   initApp();
@@ -59,17 +59,14 @@ async function initApp() {
     try {
       const cfg = await fetch(api("/api/config")).then(r => r.json());
       console.log("Connected to Knowledge Layer with config:", cfg);
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
   } else {
     updateApiStatus("offline", "Engine Offline");
   }
 
-  // Check if any documents are processed
+  // Check state and load filings
   await refreshData();
 }
-
 
 function updateApiStatus(status, text) {
   const badge = document.getElementById("apiStatusBadge");
@@ -92,6 +89,9 @@ function updateApiStatus(status, text) {
 // Data Loading & State Management
 // -----------------------------------------------------------------
 async function refreshData() {
+  await loadProcessedFilesList();
+  await loadStarterFiles();
+
   try {
     const docRes = await fetch(api("/api/documents"));
     allDocuments = await docRes.json();
@@ -101,27 +101,176 @@ async function refreshData() {
 
   const landingView = document.getElementById("landingView");
   const dashboardView = document.getElementById("dashboardView");
+  const btnBack = document.getElementById("btnBackToUpload");
 
-  if (!allDocuments || allDocuments.length === 0) {
-    // STATE 1: Empty - show landing/upload hero
+  if (currentView === "landing") {
+    // STARTING PAGE IS ALWAYS UPLOAD DOC BY DEFAULT
     if (landingView) landingView.style.display = "flex";
     if (dashboardView) dashboardView.style.display = "none";
-    await loadStarterFiles();
+    if (btnBack) btnBack.style.display = "none";
   } else {
-    // STATE 2: Processed filings exist - show analytical dashboard
+    // Active Dashboard View
     if (landingView) landingView.style.display = "none";
     if (dashboardView) dashboardView.style.display = "block";
+    if (btnBack) btnBack.style.display = "inline-flex";
 
-    await Promise.all([
-      loadObservations(),
-      loadRelationships(),
-      loadGroupedFacts(),
-      loadShowcaseCases(),
-    ]);
-
+    renderFilingSwitcher();
+    await loadActiveData();
     renderDocuments(allDocuments);
-    updateMetricsSummary();
   }
+}
+
+function showUploadPage() {
+  currentView = "landing";
+  const landingView = document.getElementById("landingView");
+  const dashboardView = document.getElementById("dashboardView");
+  const btnBack = document.getElementById("btnBackToUpload");
+
+  if (landingView) landingView.style.display = "flex";
+  if (dashboardView) dashboardView.style.display = "none";
+  if (btnBack) btnBack.style.display = "none";
+
+  loadProcessedFilesList();
+  loadStarterFiles();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function openDashboardWithFiling(docId) {
+  currentView = "dashboard";
+  const landingView = document.getElementById("landingView");
+  const dashboardView = document.getElementById("dashboardView");
+  const btnBack = document.getElementById("btnBackToUpload");
+
+  if (landingView) landingView.style.display = "none";
+  if (dashboardView) dashboardView.style.display = "block";
+  if (btnBack) btnBack.style.display = "inline-flex";
+
+  try {
+    const docRes = await fetch(api("/api/documents"));
+    allDocuments = await docRes.json();
+  } catch (e) {
+    // fallback
+  }
+
+  await switchFilingFocus(docId || "all");
+  renderDocuments(allDocuments);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function loadActiveData() {
+  await Promise.all([
+    loadObservations(currentDocFilter),
+    loadRelationships(currentDocFilter),
+    loadGroupedFacts(),
+    loadShowcaseCases(),
+  ]);
+  updateMetricsSummary();
+}
+
+// -----------------------------------------------------------------
+// Processed Filings (Option Section on Starting Page)
+// -----------------------------------------------------------------
+async function loadProcessedFilesList() {
+  const container = document.getElementById("landingProcessedList");
+  if (!container) return;
+
+  try {
+    const res = await fetch(api("/api/processed-files"));
+    processedFiles = await res.json();
+
+    if (!processedFiles || processedFiles.length === 0) {
+      container.innerHTML = `
+        <div class="empty-processed-box">
+          <div style="font-size: 1.5rem; margin-bottom: 0.35rem;">📂</div>
+          <div style="font-weight: 600; font-size: 0.88rem; color: var(--text-primary); margin-bottom: 0.25rem;">No Processed Filings on Disk Yet</div>
+          <div style="font-size: 0.78rem; color: var(--text-tertiary); max-width: 320px; margin: 0 auto;">
+            No processed JSON artifacts found. Upload a financial filing above or pick a starter dataset to run extraction.
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    let itemsHtml = `
+      <div class="processed-summary-bar">
+        <div class="processed-summary-text">
+          <span class="processed-count-badge">${processedFiles.length} Processed</span>
+          <span>Previously analyzed filings stored on disk. Open any filing individually or view consensus:</span>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="openDashboardWithFiling('all')">
+          Open All Combined (Consensus) ➔
+        </button>
+      </div>
+      <div class="processed-grid">
+    `;
+
+    processedFiles.forEach(f => {
+      itemsHtml += `
+        <div class="processed-file-item" onclick="openDashboardWithFiling('${f.doc_id}')">
+          <div class="processed-file-info">
+            <div class="processed-file-name" title="${f.filename}">
+              📄 ${f.filename}
+            </div>
+            <div class="processed-file-stats">
+              <span class="stat-pill">${f.observations_count} claims</span>
+              <span class="stat-pill">${f.relationships_count} relations</span>
+              <span class="stat-pill">${f.page_count || 1} pages</span>
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-sm" style="flex-shrink: 0;" onclick="event.stopPropagation(); openDashboardWithFiling('${f.doc_id}')">
+            Inspect ➔
+          </button>
+        </div>
+      `;
+    });
+
+    itemsHtml += `</div>`;
+    container.innerHTML = itemsHtml;
+  } catch (err) {
+    container.innerHTML = `<div class="empty-processed-box">Error loading processed filings: ${err.message}</div>`;
+  }
+}
+
+// -----------------------------------------------------------------
+// Filing Switcher (Dashboard Context Switching)
+// -----------------------------------------------------------------
+function renderFilingSwitcher() {
+  const container = document.getElementById("filingSwitcherButtons");
+  if (!container) return;
+
+  let html = `
+    <button class="switcher-btn ${currentDocFilter === 'all' ? 'active' : ''}" onclick="switchFilingFocus('all')">
+      ⊞ All Filings Combined (${allDocuments.length})
+    </button>
+  `;
+
+  allDocuments.forEach(d => {
+    const isActive = currentDocFilter === d.id;
+    html += `
+      <button class="switcher-btn ${isActive ? 'active' : ''}" onclick="switchFilingFocus('${d.id}')" title="${d.filename}">
+        📄 ${d.filename.length > 25 ? d.filename.substring(0, 22) + '...' : d.filename}
+      </button>
+    `;
+  });
+
+  container.innerHTML = html;
+}
+
+async function switchFilingFocus(docId) {
+  currentDocFilter = docId;
+
+  const titleEl = document.getElementById("activeFilingTitle");
+  if (titleEl) {
+    if (docId === "all") {
+      titleEl.innerText = "All Filings (Cross-Filing Consensus)";
+    } else {
+      const doc = allDocuments.find(d => d.id === docId) || processedFiles.find(f => f.doc_id === docId);
+      titleEl.innerText = doc ? doc.filename : docId;
+    }
+  }
+
+  renderFilingSwitcher();
+  await loadActiveData();
 }
 
 // -----------------------------------------------------------------
@@ -230,10 +379,11 @@ async function handlePDFUpload(event) {
       throw new Error(err.detail || "Processing failed");
     }
 
+    const data = await res.json();
     advanceStep(4);
     setTimeout(async () => {
       hideProcessingModal();
-      await refreshData();
+      await openDashboardWithFiling(data.document_id || "all");
     }, 600);
   } catch (err) {
     hideProcessingModal();
@@ -262,10 +412,11 @@ async function ingestStarterFiling(filename) {
       throw new Error(err.detail || "Ingestion failed");
     }
 
+    const data = await res.json();
     advanceStep(4);
     setTimeout(async () => {
       hideProcessingModal();
-      await refreshData();
+      await openDashboardWithFiling(data.document_id || "all");
     }, 600);
   } catch (err) {
     hideProcessingModal();
@@ -316,7 +467,10 @@ async function confirmClearWorkspace() {
 
   try {
     await fetch(api("/api/clear"), { method: "POST" });
-    await refreshData();
+    allDocuments = [];
+    processedFiles = [];
+    currentDocFilter = "all";
+    showUploadPage();
   } catch (err) {
     alert("Error clearing workspace: " + err.message);
   }
@@ -361,7 +515,7 @@ function updateMetricsSummary() {
   const elCtx = document.getElementById("statCtxCount");
   const elRev = document.getElementById("statReviewCount");
 
-  if (elDocs) elDocs.innerText = docCount;
+  if (elDocs) elDocs.innerText = currentDocFilter === 'all' ? docCount : 1;
   if (elObs) elObs.innerText = obsCount;
   if (elCorr) elCorr.innerText = corrCount;
   if (elCont) elCont.innerText = contCount;
@@ -640,9 +794,12 @@ function renderFacts(facts) {
 // -----------------------------------------------------------------
 // Atomic Observations Grid
 // -----------------------------------------------------------------
-async function loadObservations() {
+async function loadObservations(docId = "all") {
   try {
-    const res = await fetch(api("/api/observations"));
+    const url = docId && docId !== "all" 
+      ? api(`/api/observations?document_id=${docId}`) 
+      : api("/api/observations");
+    const res = await fetch(url);
     allObservations = await res.json();
     renderObservations(allObservations);
     renderNeedsReview(allObservations.filter(o => o.needs_review));
@@ -657,7 +814,7 @@ function renderObservations(items) {
   container.innerHTML = "";
 
   if (!items || items.length === 0) {
-    container.innerHTML = `<div style="grid-column: 1 / -1; padding: 2rem; color: var(--text-tertiary); text-align: center;">No observations extracted yet.</div>`;
+    container.innerHTML = `<div style="grid-column: 1 / -1; padding: 2rem; color: var(--text-tertiary); text-align: center;">No observations found for this context.</div>`;
     return;
   }
 
@@ -781,9 +938,12 @@ function renderNeedsReview(items) {
 // -----------------------------------------------------------------
 // Relationships List
 // -----------------------------------------------------------------
-async function loadRelationships() {
+async function loadRelationships(docId = "all") {
   try {
-    const res = await fetch(api("/api/relationships"));
+    const url = docId && docId !== "all" 
+      ? api(`/api/relationships?document_id=${docId}`) 
+      : api("/api/relationships");
+    const res = await fetch(url);
     allRelationships = await res.json();
     renderRelationships(allRelationships);
   } catch (e) {
@@ -797,7 +957,7 @@ function renderRelationships(items) {
   container.innerHTML = "";
 
   if (!items || items.length === 0) {
-    container.innerHTML = `<div style="padding: 2rem; color: var(--text-tertiary); text-align: center;">No relationships generated yet.</div>`;
+    container.innerHTML = `<div style="padding: 2rem; color: var(--text-tertiary); text-align: center;">No relationships found for this context.</div>`;
     return;
   }
 

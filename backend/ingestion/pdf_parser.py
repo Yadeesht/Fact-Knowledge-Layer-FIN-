@@ -3,16 +3,14 @@ import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-try:
-    import pypdf
-    HAS_PYPDF = True
-except ImportError:
-    HAS_PYPDF = False
+import fitz  # PyMuPDF exclusively
+
+HAS_PYMUPDF = True
 
 
-class PDFParser:
+class PyMuPDFParser:
     """
-    Structure-aware, evidence-preserving PDF parser and chunker.
+    Structure-aware, evidence-preserving PDF parser and chunker using PyMuPDF (fitz) exclusively.
     Follows deterministic rules:
     - Rule 1: Never mix pages (chunks strictly reside on a single page)
     - Rule 2: Never separate a detected table chunk
@@ -25,27 +23,38 @@ class PDFParser:
 
     def extract_pages(self, pdf_path: Path) -> List[Dict[str, Any]]:
         """
-        Extracts text from PDF by page, preserving page numbers (1-indexed).
+        Extracts text and table layout from PDF by page, preserving page numbers (1-indexed)
+        using PyMuPDF (fitz) exclusively.
         """
         pages = []
         if not pdf_path.exists():
             raise FileNotFoundError(f"PDF not found at {pdf_path}")
 
-        if HAS_PYPDF:
-            reader = pypdf.PdfReader(str(pdf_path))
-            for page_idx, page in enumerate(reader.pages):
-                text = page.extract_text() or ""
-                pages.append({
-                    "page_number": page_idx + 1,
-                    "text": text.strip(),
-                })
-        else:
-            pages.append({
-                "page_number": 1,
-                "text": f"[Extracted text placeholder for {pdf_path.name}]",
-            })
+        doc = fitz.open(str(pdf_path))
+        for page_idx in range(len(doc)):
+            page = doc[page_idx]
+            text = page.get_text("text") or ""
 
+            # Extract table structures using PyMuPDF find_tables()
+            table_texts = []
+            try:
+                tabs = page.find_tables()
+                for t in tabs:
+                    rows = t.extract()
+                    if rows:
+                        row_strs = [" | ".join(str(c or '').strip() for c in r) for r in rows]
+                        table_texts.append("\n".join(row_strs))
+            except Exception:
+                pass
+
+            pages.append({
+                "page_number": page_idx + 1,
+                "text": text.strip(),
+                "tables": table_texts,
+            })
+        doc.close()
         return pages
+
 
     def detect_document_metadata(self, pdf_path: Path) -> Dict[str, Any]:
         """
@@ -86,11 +95,23 @@ class PDFParser:
             "page_count": len(pages),
         }
 
-    def chunk_document(self, pdf_path: Path, document_id: str) -> List[Dict[str, Any]]:
+    def chunk_document(
+        self,
+        pdf_path: Optional[Path] = None,
+        document_id: str = "doc_default",
+        pages: Optional[List[Dict[str, Any]]] = None,
+        doc_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Splits document into evidence-preserving, structure-aware chunks (Section 8-9).
+        Accepts either pdf_path or pre-extracted pages, with either document_id or doc_id.
         """
-        pages = self.extract_pages(pdf_path)
+        document_id = doc_id or document_id
+        if pages is None:
+            if pdf_path is None:
+                raise ValueError("Either pdf_path or pages must be provided to chunk_document")
+            pages = self.extract_pages(pdf_path)
+
         chunks = []
         chunk_idx = 0
         current_section = "General Information"

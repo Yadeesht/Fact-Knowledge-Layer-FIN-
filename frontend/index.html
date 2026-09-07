@@ -22,7 +22,7 @@
   <!-- Top Navigation / Header -->
   <header class="app-header">
     <div class="header-container">
-      <div class="brand">
+      <div class="brand" onclick="showUploadPage()" style="cursor: pointer;">
         <div class="brand-logo">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
@@ -41,17 +41,16 @@
         </div>
 
         <input type="file" id="pdfFileInput" accept=".pdf" style="display:none;" onchange="handlePDFUpload(event)" />
-        
-        <button class="btn btn-secondary" id="btnUploadNav" onclick="document.getElementById('pdfFileInput').click()">
+
+        <button class="btn btn-secondary" id="btnBackToUpload" onclick="showUploadPage()" style="display: none;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="17 8 12 3 7 8"></polyline>
-            <line x1="12" y1="3" x2="12" y2="15"></line>
+            <polyline points="15 18 9 12 15 6"></polyline>
           </svg>
-          Upload Filing
+          ← Back to Upload
         </button>
 
-        <button class="btn btn-ghost" id="btnClearData" onclick="confirmClearWorkspace()" title="Reset workspace and remove processed files">
+        <button class="btn btn-ghost" id="btnClearData" onclick="confirmClearWorkspace()"
+          title="Reset workspace and remove processed files">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="3 6 5 6 21 6"></polyline>
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -65,37 +64,57 @@
   <!-- Main View Container -->
   <main class="main-container">
 
-    <!-- STATE 1: Landing / Ingestion View (Displayed when 0 filings are processed) -->
+    <!-- DEFAULT STARTING PAGE: Upload Document View -->
     <section class="landing-view" id="landingView">
       <div class="hero-container">
+
         <div class="hero-badge">Evidence-Grounded Knowledge Engine</div>
-        <h1 class="hero-title">Deterministic Financial Fact Reconciliation</h1>
+        <h1 class="hero-title">Upload Financial Filing</h1>
         <p class="hero-description">
-          Upload PDF filings to extract atomic observations, normalize financial units and fiscal periods, and reconcile claims across filings via a rules-first deterministic cascade.
+          Extract atomic claims, normalize currency &amp; fiscal periods, and reconcile cross-filing facts using a
+          deterministic rules-first cascade.
         </p>
 
-        <!-- Document Drop Zone -->
+        <!-- Main Upload Dropzone -->
         <div class="upload-dropzone" id="dropZone" onclick="document.getElementById('pdfFileInput').click()">
           <div class="upload-icon-wrapper">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
               <polyline points="14 2 14 8 20 8"></polyline>
               <line x1="12" y1="18" x2="12" y2="12"></line>
               <line x1="9" y1="15" x2="15" y2="15"></line>
             </svg>
           </div>
-          <div class="upload-text-main">Click or drop a financial PDF filing here</div>
-          <div class="upload-text-sub">Supports Annual Reports, IPO Prospectuses, Earnings Presentations &amp; Macroeconomic Excerpts</div>
+          <div class="upload-text-main">Drop financial PDF filing here, or click to browse</div>
+          <div class="upload-text-sub">Supports Annual Reports, Earnings Presentations, IPO Prospectuses &amp;
+            Macroeconomic Excerpts</div>
           <div class="upload-btn-wrapper">
             <span class="btn btn-primary btn-sm">Select PDF File</span>
           </div>
         </div>
 
-        <!-- Quick Starter Filings Selection -->
+        <!-- 1-Click Starter Filings -->
         <div class="starter-section">
           <div class="starter-title">Or test instantly with starter repository filings:</div>
           <div class="starter-grid" id="starterGrid">
-            <div class="starter-card-loading">Loading starter filings...</div>
+            <div class="starter-card-loading">Loading starter repository files...</div>
+          </div>
+        </div>
+
+        <!-- OPTION: Check Already Processed Filings -->
+        <div class="processed-option-section" id="landingProcessedSection">
+          <div class="processed-option-header">
+            <div>
+              <div class="processed-option-title">📁 Already Processed Filings (Option)</div>
+              <div class="processed-option-sub">Open previously analyzed documents stored on disk without re-uploading:
+              </div>
+            </div>
+          </div>
+          <div class="processed-files-list" id="landingProcessedList">
+            <div class="empty-processed-box">
+              <div style="font-size: 0.82rem; color: var(--text-tertiary);">No processed filings on disk yet. Upload a
+                PDF above to create your first processed artifact.</div>
+            </div>
           </div>
         </div>
 
@@ -103,31 +122,52 @@
         <div class="principles-grid">
           <div class="principle-card">
             <div class="principle-number">01</div>
-            <div class="principle-title">Evidence Grounding</div>
-            <div class="principle-desc">Every extracted observation preserves its exact page number, section context, and verbatim quotation.</div>
+            <div class="principle-title">PyMuPDF Layout Chunking</div>
+            <div class="principle-desc">Parses structure and tables while preserving exact page anchors and verbatim
+              quotations.</div>
           </div>
           <div class="principle-card">
             <div class="principle-number">02</div>
             <div class="principle-title">Deterministic Normalizer</div>
-            <div class="principle-desc">Bridges scale multipliers (₹ Cr vs ₹ Mn, Lakhs, Billions) and Indian Fiscal Years without LLM hallucinations.</div>
+            <div class="principle-desc">Bridges scale multipliers (₹ Cr vs ₹ Mn, Lakhs, Billions) and Indian Fiscal
+              Years without LLM hallucinations.</div>
           </div>
           <div class="principle-card">
             <div class="principle-number">03</div>
             <div class="principle-title">Rules-First Cascade</div>
-            <div class="principle-desc">Strict deterministic matching gates for entity, concept, scope, and vintage before any LLM arbitration fallback.</div>
+            <div class="principle-desc">Strict deterministic matching gates for entity, concept, scope, and vintage
+              before any LLM arbitration fallback.</div>
           </div>
           <div class="principle-card">
             <div class="principle-number">04</div>
             <div class="principle-title">Quarantine Defense</div>
-            <div class="principle-desc">Incomplete claims with missing timeframes or ambiguous units are quarantined to prevent corrupted consensus.</div>
+            <div class="principle-desc">Incomplete claims with missing timeframes or ambiguous units are quarantined to
+              prevent corrupted consensus.</div>
           </div>
         </div>
+
       </div>
     </section>
 
-    <!-- STATE 2: Knowledge Dashboard (Revealed once filings are processed) -->
+    <!-- STATE 2: Knowledge Dashboard (Shown once document is uploaded or when opening processed filings) -->
     <section class="dashboard-view" id="dashboardView" style="display: none;">
-      
+
+      <!-- Filing Switcher Bar (Switch between multiple processed documents or view all) -->
+      <div class="filing-switcher-bar">
+        <div class="switcher-label-wrap">
+          <button class="btn btn-secondary btn-sm" onclick="showUploadPage()" title="Return to upload page">
+            ← Back to Upload
+          </button>
+          <span class="switcher-tag" style="margin-left: 0.5rem;">Viewing Context:</span>
+          <span class="switcher-active-title" id="activeFilingTitle">All Filings (Cross-Filing Consensus)</span>
+        </div>
+        <div class="switcher-buttons-group" id="filingSwitcherButtons">
+          <button class="switcher-btn active" onclick="switchFilingFocus('all')">
+            ⊞ All Filings Combined
+          </button>
+        </div>
+      </div>
+
       <!-- Metrics Strip (Values calculated dynamically) -->
       <div class="metrics-grid">
         <div class="metric-card">
@@ -190,7 +230,9 @@
         <div class="tabs-group">
           <button class="tab-btn active" data-tab="showcaseTab" onclick="switchTab('showcaseTab')">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+              <polygon
+                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2">
+              </polygon>
             </svg>
             Showcase Inspector
           </button>
@@ -237,7 +279,7 @@
         </div>
 
         <div class="tabs-actions">
-          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('pdfFileInput').click()">
+          <button class="btn btn-secondary btn-sm" onclick="showUploadPage()">
             + Ingest Another PDF
           </button>
         </div>
@@ -272,10 +314,12 @@
         <div class="tab-header-strip">
           <div>
             <div class="section-title">Atomic Extracted Observations</div>
-            <div class="section-subtitle">Extracted claims with reported units, normalized base values, and citation anchors.</div>
+            <div class="section-subtitle">Extracted claims with reported units, normalized base values, and citation
+              anchors.</div>
           </div>
           <div class="filter-controls">
-            <input type="text" class="input-search" id="obsSearchInput" placeholder="Filter claims..." oninput="filterObservations()" />
+            <input type="text" class="input-search" id="obsSearchInput" placeholder="Filter claims..."
+              oninput="filterObservations()" />
             <select class="select-filter" id="obsFilterStatus" onchange="filterObservations()">
               <option value="all">All Assertions</option>
               <option value="actual">Actual Only</option>
@@ -292,10 +336,12 @@
         <div class="tab-header-strip">
           <div>
             <div class="section-title">Reconciliation Graph Relationships</div>
-            <div class="section-subtitle">Deterministic cascade verdicts computed between candidate observation pairs.</div>
+            <div class="section-subtitle">Deterministic cascade verdicts computed between candidate observation pairs.
+            </div>
           </div>
           <div class="filter-controls">
-            <input type="text" class="input-search" id="relSearchInput" placeholder="Search relationships..." oninput="filterRelationships()" />
+            <input type="text" class="input-search" id="relSearchInput" placeholder="Search relationships..."
+              oninput="filterRelationships()" />
             <select class="select-filter" id="relTypeFilter" onchange="filterRelationships()">
               <option value="all">All Verdicts</option>
               <option value="corroborates">Corroborates</option>
@@ -323,7 +369,8 @@
         <div class="tab-header-strip">
           <div>
             <div class="section-title">Quarantined Claims for Audit</div>
-            <div class="section-subtitle">Claims blocked from auto-reconciliation due to missing units or ambiguous timeframes.</div>
+            <div class="section-subtitle">Claims blocked from auto-reconciliation due to missing units or ambiguous
+              timeframes.</div>
           </div>
         </div>
         <div class="data-grid" id="needsReviewGrid"></div>
@@ -346,7 +393,7 @@
       <div class="stepper-list">
         <div class="stepper-item active" id="step1">
           <span class="step-bullet">1</span>
-          <span class="step-text">Layout-Aware PDF Parsing &amp; Table Chunking</span>
+          <span class="step-text">PyMuPDF Layout-Aware Parsing &amp; Table Chunking</span>
         </div>
         <div class="stepper-item" id="step2">
           <span class="step-bullet">2</span>

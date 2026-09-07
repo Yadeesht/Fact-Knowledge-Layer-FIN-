@@ -29,3 +29,6 @@ ehthumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Temporary test extraction outputs
+temp_data/

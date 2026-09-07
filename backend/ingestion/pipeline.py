@@ -1,9 +1,10 @@
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from backend.db.repository import Repository
-from backend.ingestion.pdf_parser import PDFParser
+from backend.ingestion.pdf_parser import PyMuPDFParser
 from backend.ingestion.extractor import extract_observations_from_text
 from backend.reconciliation.cascade import reconcile_deterministically
 from backend.reconciliation.llm_judge import reconcile_with_llm
@@ -16,13 +17,14 @@ def process_pdf_document(
     pdf_path: Path,
     filename: Optional[str] = None,
     dataset: str = "uploaded",
-    extractor_model: str = "gemini-1.5-flash",
+    extractor_model: Optional[str] = None,
     repo: Optional[Repository] = None,
 ) -> Dict[str, Any]:
     """
     Synchronous end-to-end PDF processing pipeline (§5):
     1. Register document and start processing run
     2. Extract layout-aware chunks and store in `chunks` table
+
     3. Extract observations per chunk
     4. Validate and normalize into `Observation` + `Evidence`
     5. Bucket and reconcile candidate pairs
@@ -38,9 +40,10 @@ def process_pdf_document(
         doc_id = f"doc_{uuid.uuid4().hex[:8]}"
         run_id = f"run_{uuid.uuid4().hex[:8]}"
         start_time = datetime.utcnow().isoformat()
+        model_name = extractor_model or os.getenv("EXTRACTOR_MODEL", "gemini-1.5-flash")
 
-        # Step 1: Detect metadata and register document
-        parser = PDFParser()
+        # Step 1: Detect metadata and register document using PyMuPDF (fitz)
+        parser = PyMuPDFParser()
         meta = parser.detect_document_metadata(pdf_path)
         doc_type = meta.get("document_type", "pdf")
         page_count = meta.get("page_count", 0)
@@ -57,10 +60,11 @@ def process_pdf_document(
             run_id=run_id,
             document_id=doc_id,
             status="started",
-            extractor_model=extractor_model,
+            extractor_model=model_name,
             metrics={"pdf_pages_parsed": page_count, "chunks_created": 0},
             started_at=start_time,
         )
+
 
         # Step 2: Extract and persist chunks
         chunks = parser.chunk_document(pdf_path, document_id=doc_id)
@@ -143,11 +147,12 @@ def process_pdf_document(
             run_id=run_id,
             document_id=doc_id,
             status="completed",
-            extractor_model=extractor_model,
+            extractor_model=model_name,
             metrics=metrics,
             started_at=start_time,
             completed_at=completed_time,
         )
+
 
         return {
             "status": "success",
