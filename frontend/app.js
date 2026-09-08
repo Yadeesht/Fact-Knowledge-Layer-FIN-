@@ -10,6 +10,53 @@ function api(path) {
   return `${API_BASE}${path}`;
 }
 
+// Display helpers: API values may originate in a PDF/LLM response, so keep
+// rendering safe and consistent across the evidence-first card views.
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>'"]/g, char => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
+  })[char]);
+}
+
+function displayName(value) {
+  const text = String(value || "Unknown").trim();
+  if (!text) return "Unknown";
+  return text.replace(/\b([a-z])/g, char => char.toUpperCase());
+}
+
+function hasMeaningfulNormalization(value) {
+  if (!value || value.amount === null || value.amount === undefined ||
+    value.normalized_amount === null || value.normalized_amount === undefined) return false;
+  const rawUnit = String(value.unit || "").trim().toLowerCase();
+  const normalizedUnit = String(value.normalized_unit || "").trim().toLowerCase();
+  return Math.abs(Number(value.amount) - Number(value.normalized_amount)) > 1e-9 ||
+    (rawUnit && normalizedUnit && rawUnit !== normalizedUnit);
+}
+
+function factAccent(value, entity) {
+  if (value?.type === "currency") return "coin";
+  if (value?.type === "percentage") return "trend";
+  if (/india|government|reserve bank/i.test(entity || "")) return "landmark";
+  return "ledger";
+}
+
+function accentSvg(kind) {
+  const paths = {
+    coin: '<circle cx="12" cy="12" r="8"></circle><path d="M14.8 8.8c-.5-.5-1.3-.8-2.5-.8-1.7 0-2.8.8-2.8 2 0 3 5.2 1.2 5.2 4 0 1.2-1.1 2-2.8 2-1.2 0-2.2-.4-2.9-1"></path><path d="M12 6.5v11"></path>',
+    trend: '<path d="M4 17l5-5 3 3 7-8"></path><path d="M14 7h5v5"></path>',
+    landmark: '<path d="M3 10h18M5 10v8m4-8v8m6-8v8m4-8v8M3 21h18M12 3l9 5H3l9-5z"></path>',
+    ledger: '<rect x="5" y="3" width="14" height="18" rx="2"></rect><path d="M8 8h8M8 12h8M8 16h5"></path>'
+  };
+  return `<svg class="fact-accent-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8">${paths[kind] || paths.ledger}</svg>`;
+}
+
+function evidenceBlock(evidence) {
+  const quote = evidence?.quote?.trim() || "Evidence quote unavailable for this claim.";
+  const source = evidence?.document_id ? escapeHtml(evidence.document_id) : "Source not linked";
+  const page = evidence?.page_number ? `p. ${escapeHtml(evidence.page_number)}` : "Page not specified";
+  return `<div class="evidence-quote-box evidence-quote-uniform"><span class="evidence-label">Source evidence</span><q>${escapeHtml(quote)}</q><div class="evidence-meta"><span>${source}</span><span>${page}</span></div></div>`;
+}
+
 let allDocuments = [];
 let processedFiles = [];
 let allObservations = [];
@@ -131,7 +178,6 @@ function showUploadPage() {
   if (btnBack) btnBack.style.display = "none";
 
   loadProcessedFilesList();
-  loadStarterFiles();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -181,10 +227,14 @@ async function loadProcessedFilesList() {
     if (!processedFiles || processedFiles.length === 0) {
       container.innerHTML = `
         <div class="empty-processed-box">
-          <div style="font-size: 1.5rem; margin-bottom: 0.35rem;">📂</div>
+          <div style="display: flex; justify-content: center; margin-bottom: 0.5rem; color: var(--text-tertiary);">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+          </div>
           <div style="font-weight: 600; font-size: 0.88rem; color: var(--text-primary); margin-bottom: 0.25rem;">No Processed Filings on Disk Yet</div>
-          <div style="font-size: 0.78rem; color: var(--text-tertiary); max-width: 320px; margin: 0 auto;">
-            No processed JSON artifacts found. Upload a financial filing above or pick a starter dataset to run extraction.
+          <div style="font-size: 0.78rem; color: var(--text-tertiary); max-width: 290px; margin: 0 auto; line-height: 1.4;">
+            No processed JSON artifacts found. Upload a financial filing on the left to run extraction.
           </div>
         </div>
       `;
@@ -194,11 +244,15 @@ async function loadProcessedFilesList() {
     let itemsHtml = `
       <div class="processed-summary-bar">
         <div class="processed-summary-text">
-          <span class="processed-count-badge">${processedFiles.length} Processed</span>
-          <span>Previously analyzed filings stored on disk. Open any filing individually or view consensus:</span>
+          <span class="processed-count-badge">${processedFiles.length} Filings</span>
+          <span style="font-size: 0.76rem; color: var(--text-tertiary);">Saved on disk</span>
         </div>
-        <button class="btn btn-primary btn-sm" onclick="openDashboardWithFiling('all')">
-          Open All Combined (Consensus) ➔
+        <button class="btn btn-primary btn-sm" onclick="openDashboardWithFiling('all')" style="padding: 0.32rem 0.65rem; font-size: 0.76rem;">
+          Open All Combined
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="vertical-align: -1px; margin-left: 3px;">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
         </button>
       </div>
       <div class="processed-grid">
@@ -206,10 +260,14 @@ async function loadProcessedFilesList() {
 
     processedFiles.forEach(f => {
       itemsHtml += `
-        <div class="processed-file-item" onclick="openDashboardWithFiling('${f.doc_id}')">
+        <div class="processed-file-item" onclick="openDashboardWithFiling('${escapeHtml(f.doc_id)}')">
           <div class="processed-file-info">
-            <div class="processed-file-name" title="${f.filename}">
-              📄 ${f.filename}
+            <div class="processed-file-name" title="${escapeHtml(f.filename)}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 5px; color: var(--accent-primary);">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+              </svg>
+              ${escapeHtml(f.filename)}
             </div>
             <div class="processed-file-stats">
               <span class="stat-pill">${f.observations_count} claims</span>
@@ -218,11 +276,18 @@ async function loadProcessedFilesList() {
             </div>
           </div>
           <div style="display: flex; gap: 0.4rem; flex-shrink: 0;" onclick="event.stopPropagation();">
-            <button class="btn btn-secondary btn-sm" onclick="promptReconciliationForExisting('${f.doc_id}', '${f.filename}')" title="Re-run reconciliation with specific mode">
-              ⚡ Reconcile
+            <button class="btn btn-secondary btn-sm" onclick="promptReconciliationForExisting('${escapeHtml(f.doc_id)}', '${escapeHtml(f.filename)}')" title="Re-run reconciliation with specific mode">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -1px; margin-right: 3px;">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+              </svg>
+              Reconcile
             </button>
-            <button class="btn btn-primary btn-sm" onclick="openDashboardWithFiling('${f.doc_id}')">
-              Inspect ➔
+            <button class="btn btn-primary btn-sm" onclick="openDashboardWithFiling('${escapeHtml(f.doc_id)}')">
+              Inspect
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="vertical-align: -1px; margin-left: 3px;">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+              </svg>
             </button>
           </div>
         </div>
@@ -232,7 +297,7 @@ async function loadProcessedFilesList() {
     itemsHtml += `</div>`;
     container.innerHTML = itemsHtml;
   } catch (err) {
-    container.innerHTML = `<div class="empty-processed-box">Error loading processed filings: ${err.message}</div>`;
+    container.innerHTML = `<div class="empty-processed-box">Error loading processed filings: ${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -245,15 +310,26 @@ function renderFilingSwitcher() {
 
   let html = `
     <button class="switcher-btn ${currentDocFilter === 'all' ? 'active' : ''}" onclick="switchFilingFocus('all')">
-      ⊞ All Filings Combined (${allDocuments.length})
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 5px;">
+        <rect x="3" y="3" width="7" height="7"></rect>
+        <rect x="14" y="3" width="7" height="7"></rect>
+        <rect x="14" y="14" width="7" height="7"></rect>
+        <rect x="3" y="14" width="7" height="7"></rect>
+      </svg>
+      All Filings Combined (${allDocuments.length})
     </button>
   `;
 
   allDocuments.forEach(d => {
     const isActive = currentDocFilter === d.id;
+    const shortName = d.filename.length > 25 ? d.filename.substring(0, 22) + '...' : d.filename;
     html += `
-      <button class="switcher-btn ${isActive ? 'active' : ''}" onclick="switchFilingFocus('${d.id}')" title="${d.filename}">
-        📄 ${d.filename.length > 25 ? d.filename.substring(0, 22) + '...' : d.filename}
+      <button class="switcher-btn ${isActive ? 'active' : ''}" onclick="switchFilingFocus('${escapeHtml(d.id)}')" title="${escapeHtml(d.filename)}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin-right: 5px;">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+        </svg>
+        ${escapeHtml(shortName)}
       </button>
     `;
   });
@@ -281,42 +357,6 @@ async function switchFilingFocus(docId) {
 
   renderFilingSwitcher();
   await loadActiveData();
-}
-
-// -----------------------------------------------------------------
-// Starter Files Loading
-// -----------------------------------------------------------------
-async function loadStarterFiles() {
-  const grid = document.getElementById("starterGrid");
-  if (!grid) return;
-
-  try {
-    const res = await fetch(api("/api/starter-files"));
-    const starters = await res.json();
-
-    if (!starters || starters.length === 0) {
-      grid.innerHTML = `<div class="starter-card-loading">No starter files found in repository.</div>`;
-      return;
-    }
-
-    grid.innerHTML = "";
-    starters.forEach(item => {
-      const card = document.createElement("div");
-      card.className = "starter-card";
-      card.onclick = () => ingestStarterFiling(item.filename);
-
-      card.innerHTML = `
-        <div class="starter-card-title">${item.filename}</div>
-        <div class="starter-card-meta">
-          <span>${item.dataset}</span>
-          <span>${item.size_mb} MB</span>
-        </div>
-      `;
-      grid.appendChild(card);
-    });
-  } catch (err) {
-    grid.innerHTML = `<div class="starter-card-loading">Drop or upload a PDF above to begin.</div>`;
-  }
 }
 
 // -------------------------------------------------------------
@@ -355,7 +395,7 @@ function startProgressPolling() {
           st.classList.add("completed");
         }
         const lbl = document.getElementById(`stepLabel${s}`);
-        if (lbl) lbl.innerText = "✓";
+        if (lbl) lbl.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="display:inline-block; vertical-align: middle;"><polyline points="20 6 9 17 4 12"></polyline></svg>';
       }
 
       // Mark current step active and update ring & text
@@ -392,7 +432,7 @@ function setStepProgress(stepNum, percent, statusText) {
   }
   if (label) {
     if (p >= 100) {
-      label.innerText = "✓";
+      label.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="display:inline-block; vertical-align: middle;"><polyline points="20 6 9 17 4 12"></polyline></svg>';
     } else {
       label.innerText = `${p}%`;
     }
@@ -508,7 +548,7 @@ function advanceStep(num, statusText) {
       step.classList.add("completed");
     }
     if (bar) bar.style.strokeDashoffset = 0;
-    if (label) label.innerText = "✓";
+    if (label) label.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="display:inline-block; vertical-align: middle;"><polyline points="20 6 9 17 4 12"></polyline></svg>';
     if (sub) sub.innerText = "Completed";
   }
 
@@ -551,9 +591,9 @@ function openReconcileModal(target, displayName) {
   if (filenameEl) {
     if (target.type === "batch_upload" && target.files && target.files.length > 1) {
       const fileNames = target.files.map(f => f.name).join(", ");
-      filenameEl.innerHTML = `Target: <strong>${target.files.length} Filings Selected</strong> (<span style="font-size:0.75rem; color:var(--text-tertiary);" title="${fileNames}">${fileNames.length > 65 ? fileNames.substring(0, 62) + '...' : fileNames}</span>) — Select reconciliation scope:`;
+      filenameEl.innerHTML = `Target: <strong>${target.files.length} Filings Selected</strong> (<span style="font-size:0.75rem; color:var(--text-tertiary);" title="${escapeHtml(fileNames)}">${fileNames.length > 65 ? escapeHtml(fileNames.substring(0, 62)) + '...' : escapeHtml(fileNames)}</span>) &mdash; Select reconciliation scope:`;
     } else {
-      filenameEl.innerHTML = `Target filing: <strong>${displayName}</strong> — Select reconciliation scope:`;
+      filenameEl.innerHTML = `Target filing: <strong>${escapeHtml(displayName)}</strong> &mdash; Select reconciliation scope:`;
     }
   }
 
@@ -1179,8 +1219,9 @@ function renderObservations(items) {
       </div>
 
       ${obs.review_reason ? `
-        <div style="background: var(--color-review-bg); border-left: 2px solid var(--color-review); padding: 0.45rem 0.65rem; font-size: 0.72rem; color: #e9d5ff; margin-bottom: 0.65rem;">
-          ⚠ ${obs.review_reason}
+        <div style="background: var(--color-review-bg); border-left: 2px solid var(--color-review); padding: 0.45rem 0.65rem; font-size: 0.72rem; color: #e9d5ff; margin-bottom: 0.65rem; display: flex; align-items: center; gap: 5px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          <span>${escapeHtml(obs.review_reason)}</span>
         </div>
       ` : ''}
 
@@ -1228,8 +1269,9 @@ function renderNeedsReview(items) {
 
   if (!items || items.length === 0) {
     container.innerHTML = `
-      <div style="grid-column: 1 / -1; padding: 2.5rem 1rem; color: var(--text-tertiary); text-align: center;">
-        ✓ Quarantine queue is empty. All claims have complete temporal and unit grounding.
+      <div style="grid-column: 1 / -1; padding: 2.5rem 1rem; color: var(--text-tertiary); text-align: center; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--color-corroborated);"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+        <span>Quarantine queue is empty. All claims have complete temporal and unit grounding.</span>
       </div>
     `;
     return;
@@ -1253,8 +1295,9 @@ function renderNeedsReview(items) {
         </span>
       </div>
 
-      <div style="background: var(--color-review-bg); border-left: 2px solid var(--color-review); padding: 0.45rem 0.65rem; font-size: 0.72rem; color: #e9d5ff; margin-bottom: 0.65rem;">
-        ⚠ Reason: <strong>${obs.review_reason || 'Incomplete grounding'}</strong>
+      <div style="background: var(--color-review-bg); border-left: 2px solid var(--color-review); padding: 0.45rem 0.65rem; font-size: 0.72rem; color: #e9d5ff; margin-bottom: 0.65rem; display: flex; align-items: center; gap: 5px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+        <span>Reason: <strong>${escapeHtml(obs.review_reason || 'Incomplete grounding')}</strong></span>
       </div>
 
       <div class="evidence-quote-box" style="margin-top: auto;">
@@ -1265,6 +1308,64 @@ function renderNeedsReview(items) {
         </div>
       </div>
     `;
+    container.appendChild(card);
+  });
+}
+
+function renderFacts(facts) {
+  const container = document.getElementById("factsList");
+  if (!container) return;
+  container.innerHTML = "";
+  if (!facts || facts.length === 0) {
+    container.innerHTML = '<div class="empty-state">No canonical facts grouped yet.</div>';
+    return;
+  }
+  facts.forEach(fact => {
+    const observations = fact.observations || [];
+    const first = observations[0];
+    const card = document.createElement("article");
+    card.className = "fact-card claim-card";
+    card.innerHTML = `
+      <div class="claim-card-topline"><div class="claim-icon-wrap">${accentSvg(factAccent(first?.value, fact.entity_name))}</div><div class="claim-heading"><span class="obs-entity-title">${escapeHtml(displayName(fact.entity_name))}</span><span class="obs-concept-sub">${escapeHtml(fact.concept_name || "Canonical fact")}</span></div><span class="showcase-item-badge badge-${escapeHtml(fact.status || "neutral")}">${escapeHtml((fact.status || "single source").replaceAll("_", " "))}</span></div>
+      <div class="claim-data-inset"><div class="claim-context-row"><span>${observations.length} grounded observation${observations.length === 1 ? "" : "s"}</span><span>${escapeHtml(first?.time?.label || "Period not specified")}</span></div></div>
+      ${evidenceBlock(first?.evidence?.[0])}`;
+    container.appendChild(card);
+  });
+}
+
+function renderRelationships(items) {
+  const container = document.getElementById("relationshipsList");
+  if (!container) return;
+  container.innerHTML = "";
+  if (!items || items.length === 0) {
+    container.innerHTML = '<div class="empty-state">No relationships found for this context.</div>';
+    return;
+  }
+  items.forEach(rel => {
+    const obsA = allObservations.find(o => o.id === rel.observation_a);
+    const obsB = allObservations.find(o => o.id === rel.observation_b);
+    const card = document.createElement("article");
+    card.className = "relationship-card claim-card";
+    card.innerHTML = `
+      <div class="claim-card-topline"><div class="claim-icon-wrap">${accentSvg("ledger")}</div><div class="claim-heading"><span class="obs-entity-title">${escapeHtml(displayName(obsA?.entity?.canonical_name || "Relationship"))}</span><span class="obs-concept-sub">${escapeHtml(obsA?.concept?.canonical_name || rel.observation_a)} <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px; margin: 0 4px; opacity: 0.65;"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg> ${escapeHtml(obsB?.concept?.canonical_name || rel.observation_b)}</span></div><span class="showcase-item-badge badge-${escapeHtml(rel.relationship_type || "neutral")}">${escapeHtml((rel.relationship_type || "unresolved").replaceAll("_", " "))}</span></div>
+      <div class="claim-data-inset"><div class="relationship-values"><div><span>Observation A</span><strong>${escapeHtml(obsA?.value?.amount ?? obsA?.value?.text ?? "Not in current filter")}</strong></div><div><span>Observation B</span><strong>${escapeHtml(obsB?.value?.amount ?? obsB?.value?.text ?? "Not in current filter")}</strong></div></div><p class="relationship-explanation">${escapeHtml(rel.explanation || "No explanation supplied.")}</p></div>
+      ${evidenceBlock(obsA?.evidence?.[0])}`;
+    container.appendChild(card);
+  });
+}
+
+function renderDocuments(docs) {
+  const container = document.getElementById("documentsGrid");
+  if (!container) return;
+  container.innerHTML = "";
+  if (!docs || docs.length === 0) {
+    container.innerHTML = '<div class="empty-state">No filing documents processed.</div>';
+    return;
+  }
+  docs.forEach(doc => {
+    const card = document.createElement("article");
+    card.className = "obs-card claim-card filing-card";
+    card.innerHTML = `<div class="claim-card-topline"><div class="claim-icon-wrap">${accentSvg("ledger")}</div><div class="claim-heading"><span class="obs-entity-title">${escapeHtml(doc.filename)}</span><span class="obs-concept-sub">${escapeHtml(doc.dataset || "Uploaded filing")}</span></div><span class="showcase-item-badge badge-corroborated">${escapeHtml(doc.document_type || "PDF")}</span></div><div class="claim-data-inset"><div class="filing-stats"><span><strong>${escapeHtml(doc.page_count || 0)}</strong> pages</span><span><strong>${escapeHtml(doc.chunk_count || 0)}</strong> chunks</span><span><strong>${escapeHtml(doc.observation_count || 0)}</strong> claims</span></div></div>`;
     container.appendChild(card);
   });
 }
@@ -1363,7 +1464,7 @@ function filterRelationships() {
       const a = allObservations.find(o => o.id === r.observation_a);
       const b = allObservations.find(o => o.id === r.observation_b);
       return (a && (a.entity.canonical_name.toLowerCase().includes(searchVal) || a.concept.canonical_name.toLowerCase().includes(searchVal))) ||
-             (b && (b.entity.canonical_name.toLowerCase().includes(searchVal) || b.concept.canonical_name.toLowerCase().includes(searchVal)));
+        (b && (b.entity.canonical_name.toLowerCase().includes(searchVal) || b.concept.canonical_name.toLowerCase().includes(searchVal)));
     };
     const matchSearch =
       !searchVal ||
@@ -1407,6 +1508,62 @@ function renderDocuments(docs) {
         Document ID: <code>${d.id}</code><br/>Ingested: ${d.created_at}
       </div>
     `;
+    container.appendChild(card);
+  });
+}
+
+// Evidence-first claim-card renderers. These intentionally replace the earlier
+// basic renderers while retaining the same API response shape and filters.
+function renderObservations(items) {
+  const container = document.getElementById("observationsGrid");
+  if (!container) return;
+  container.innerHTML = "";
+  if (!items || items.length === 0) {
+    container.innerHTML = '<div class="empty-state">No observations found for this context.</div>';
+    return;
+  }
+
+  items.forEach(obs => {
+    const ev = obs.evidence && obs.evidence[0];
+    const normalized = hasMeaningfulNormalization(obs.value)
+      ? `<span class="normalized-pill">Normalized: ${escapeHtml(obs.value.normalized_amount.toLocaleString())} ${escapeHtml(obs.value.normalized_unit || "")}</span>` : "";
+    const period = obs.time?.label ? escapeHtml(obs.time.label) : '<span class="missing-context">Period not specified</span>';
+    const scope = obs.scope?.consolidation && obs.scope.consolidation !== "unknown"
+      ? `<span>Scope: <strong>${escapeHtml(obs.scope.consolidation)}</strong></span>` : "";
+    const card = document.createElement("article");
+    card.className = `obs-card claim-card ${obs.needs_review ? "claim-card-review" : ""}`;
+    card.innerHTML = `
+      <div class="claim-card-topline">
+        <div class="claim-icon-wrap">${accentSvg(factAccent(obs.value, obs.entity?.canonical_name))}</div>
+        <div class="claim-heading"><span class="obs-entity-title">${escapeHtml(displayName(obs.entity?.canonical_name))}</span><span class="obs-concept-sub">${escapeHtml(obs.concept?.canonical_name || "Unknown metric")}</span></div>
+        <span class="showcase-item-badge ${obs.needs_review ? "badge-review" : "badge-corroborated"}">${obs.needs_review ? "Quarantine" : escapeHtml(obs.assertion_status || "unknown")}</span>
+      </div>
+      <div class="claim-data-inset">
+        <div class="value-display"><span class="reported-value">${escapeHtml(obs.value?.amount ?? obs.value?.text ?? "N/A")} ${escapeHtml(obs.value?.unit || "")}</span>${normalized}</div>
+        <div class="claim-context-row"><span>Period: <strong>${period}</strong></span>${scope}</div>
+        ${obs.review_reason ? `<div class="claim-review-reason"><span>Audit reason</span> ${escapeHtml(obs.review_reason)}</div>` : ""}
+      </div>
+      ${evidenceBlock(ev)}`;
+    container.appendChild(card);
+  });
+}
+
+function renderNeedsReview(items) {
+  const container = document.getElementById("needsReviewGrid");
+  if (!container) return;
+  container.innerHTML = "";
+  if (!items || items.length === 0) {
+    container.innerHTML = '<div class="empty-state">The quarantine queue is empty. All claims have complete temporal and unit grounding.</div>';
+    return;
+  }
+  items.forEach(obs => {
+    const ev = obs.evidence && obs.evidence[0];
+    const card = document.createElement("article");
+    card.className = "obs-card claim-card claim-card-review";
+    card.innerHTML = `
+      <div class="claim-card-topline"><div class="claim-icon-wrap">${accentSvg(factAccent(obs.value, obs.entity?.canonical_name))}</div><div class="claim-heading"><span class="obs-entity-title">${escapeHtml(displayName(obs.entity?.canonical_name))}</span><span class="obs-concept-sub">${escapeHtml(obs.concept?.canonical_name || "Unknown metric")}</span></div><span class="showcase-item-badge badge-review">Quarantine</span></div>
+      <div class="claim-data-inset"><div class="value-display"><span class="reported-value">${escapeHtml(obs.value?.amount ?? obs.value?.text ?? "N/A")} ${escapeHtml(obs.value?.unit || "")}</span></div><div class="claim-context-row"><span>Period: <strong>${obs.time?.label ? escapeHtml(obs.time.label) : '<span class="missing-context">Period not specified</span>'}</strong></span></div><div class="claim-review-reason"><span>Audit reason</span> ${escapeHtml(obs.review_reason || "Incomplete grounding")}</div></div>
+      ${evidenceBlock(ev)}`;
     container.appendChild(card);
   });
 }

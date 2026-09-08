@@ -23,9 +23,27 @@
   <header class="app-header">
     <div class="header-container">
       <div class="brand" onclick="showUploadPage()" style="cursor: pointer;">
-        <div class="brand-logo">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+        <div class="brand-logo" title="Financial Fact Knowledge Layer">
+          <svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="brandGradTop" x1="5" y1="4" x2="27" y2="16" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#38bdf8" />
+                <stop offset="100%" stop-color="#818cf8" />
+              </linearGradient>
+              <linearGradient id="brandGradLeft" x1="5" y1="10" x2="16" y2="28" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#6366f1" />
+                <stop offset="100%" stop-color="#3730a3" />
+              </linearGradient>
+              <linearGradient id="brandGradRight" x1="27" y1="10" x2="16" y2="28" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#c084fc" />
+                <stop offset="100%" stop-color="#06b6d4" />
+              </linearGradient>
+            </defs>
+            <path d="M16 3.5L27 9.85V10.15L16 16.5L5 10.15V9.85L16 3.5Z" fill="url(#brandGradTop)" />
+            <path d="M5 10.15L16 16.5V28.5L5 22.15V10.15Z" fill="url(#brandGradLeft)" />
+            <path d="M16 16.5L27 10.15V22.15L16 28.5V16.5Z" fill="url(#brandGradRight)" />
+            <path d="M16 3.5L16 16.5M16 16.5L5 22.15M16 16.5L27 22.15" stroke="rgba(255,255,255,0.4)" stroke-width="1.2" stroke-linejoin="round" />
+            <circle cx="16" cy="16.5" r="2.4" fill="#ffffff" />
           </svg>
         </div>
         <div>
@@ -40,13 +58,15 @@
           <span id="apiStatusText">Engine Ready</span>
         </div>
 
-        <input type="file" id="pdfFileInput" accept=".pdf" multiple style="display:none;" onchange="handlePDFUpload(event)" />
+        <input type="file" id="pdfFileInput" accept=".pdf" multiple style="display:none;"
+          onchange="handlePDFUpload(event)" />
 
         <button class="btn btn-secondary" id="btnBackToUpload" onclick="showUploadPage()" style="display: none;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="15 18 9 12 15 6"></polyline>
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
           </svg>
-          ← Back to Upload
+          Back to Upload
         </button>
 
         <button class="btn btn-ghost" id="btnClearData" onclick="confirmClearWorkspace()"
@@ -68,83 +88,81 @@
     <section class="landing-view" id="landingView">
       <div class="hero-container">
 
-        <div class="hero-badge">Evidence-Grounded Knowledge Engine</div>
-        <h1 class="hero-title">Upload Financial Filings</h1>
+        <div class="hero-badge">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+            style="vertical-align: -2px; margin-right: 5px; color: var(--accent-primary);">
+            <polygon
+              points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2">
+            </polygon>
+          </svg>
+          Evidence-Grounded Knowledge Engine
+        </div>
+        <h1 class="hero-title">Upload &amp; Reconcile Financial Filings</h1>
         <p class="hero-description">
           Extract atomic claims, normalize currency &amp; fiscal periods, and reconcile cross-filing facts using a
           deterministic rules-first cascade.
         </p>
 
-        <!-- Main Upload Dropzone -->
-        <div class="upload-dropzone" id="dropZone" onclick="document.getElementById('pdfFileInput').click()">
-          <div class="upload-icon-wrapper">
-            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="12" y1="18" x2="12" y2="12"></line>
-              <line x1="9" y1="15" x2="15" y2="15"></line>
-            </svg>
+        <!-- Side-by-side 2-column grid for Ingestion and Existing Processed Filings -->
+        <div class="landing-main-grid">
+          <!-- Left Column: Main Upload Dropzone -->
+          <div class="upload-dropzone" id="dropZone" onclick="document.getElementById('pdfFileInput').click()">
+            <div class="landing-card-pill pill-upload">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                style="vertical-align: -1px; margin-right: 4px;">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              Ingest Documents
+            </div>
+            <div class="upload-icon-wrapper">
+              <div class="upload-icon-halo">
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="12" y1="18" x2="12" y2="12"></line>
+                  <line x1="9" y1="15" x2="15" y2="15"></line>
+                </svg>
+              </div>
+            </div>
+            <div class="upload-text-main">Drop PDF filings here or click to browse</div>
+            <div class="upload-text-sub">Select single or multiple PDFs simultaneously (Annual Reports, 10-K, 10-Q, 8-K,
+              Earnings Decks)</div>
+            <div class="upload-btn-wrapper">
+              <span class="btn btn-primary btn-sm">Select PDF File(s)</span>
+            </div>
+            <div class="upload-card-footnote">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                style="vertical-align: -1px; margin-right: 4px; color: var(--color-corroborated);">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              Deterministic unit normalization &amp; consensus reconciliation
+            </div>
           </div>
-          <div class="upload-text-main">Drop one or multiple financial PDF filings here, or click to browse</div>
-          <div class="upload-text-sub">Select single or multiple PDFs simultaneously (Annual Reports, Earnings Presentations, IPO Prospectuses)</div>
-          <div class="upload-btn-wrapper">
-            <span class="btn btn-primary btn-sm">Select PDF File(s)</span>
-          </div>
-        </div>
 
-        <!-- 1-Click Starter Filings -->
-        <div class="starter-section">
-          <div class="starter-title">Or test instantly with starter repository filings:</div>
-          <div class="starter-grid" id="starterGrid">
-            <div class="starter-card-loading">Loading starter repository files...</div>
-          </div>
-        </div>
-
-        <!-- OPTION: Check Already Processed Filings -->
-        <div class="processed-option-section" id="landingProcessedSection">
-          <div class="processed-option-header">
-            <div>
-              <div class="processed-option-title">📁 Already Processed Filings (Option)</div>
-              <div class="processed-option-sub">Open previously analyzed documents stored on disk without re-uploading:
+          <!-- Right Column: OPTION Check Already Processed Filings -->
+          <div class="processed-option-section" id="landingProcessedSection">
+            <div class="processed-option-header">
+              <div>
+                <div class="landing-card-pill pill-processed">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                    style="vertical-align: -1px; margin-right: 4px;">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                  Cached On Disk
+                </div>
+                <div class="processed-option-title">Already Processed Filings</div>
+                <div class="processed-option-sub">Open previously analyzed documents stored on disk without re-uploading</div>
+              </div>
+            </div>
+            <div class="processed-files-list" id="landingProcessedList">
+              <div class="empty-processed-box">
+                <div style="font-size: 0.82rem; color: var(--text-tertiary);">No processed filings on disk yet. Upload a
+                  PDF on the left to create your first processed artifact.</div>
               </div>
             </div>
           </div>
-          <div class="processed-files-list" id="landingProcessedList">
-            <div class="empty-processed-box">
-              <div style="font-size: 0.82rem; color: var(--text-tertiary);">No processed filings on disk yet. Upload a
-                PDF above to create your first processed artifact.</div>
-            </div>
-          </div>
         </div>
-
-        <!-- Engine Principles Grid -->
-        <div class="principles-grid">
-          <div class="principle-card">
-            <div class="principle-number">01</div>
-            <div class="principle-title">PyMuPDF Layout Chunking</div>
-            <div class="principle-desc">Parses structure and tables while preserving exact page anchors and verbatim
-              quotations.</div>
-          </div>
-          <div class="principle-card">
-            <div class="principle-number">02</div>
-            <div class="principle-title">Deterministic Normalizer</div>
-            <div class="principle-desc">Bridges scale multipliers (₹ Cr vs ₹ Mn, Lakhs, Billions) and Indian Fiscal
-              Years without LLM hallucinations.</div>
-          </div>
-          <div class="principle-card">
-            <div class="principle-number">03</div>
-            <div class="principle-title">Rules-First Cascade</div>
-            <div class="principle-desc">Strict deterministic matching gates for entity, concept, scope, and vintage
-              before any LLM arbitration fallback.</div>
-          </div>
-          <div class="principle-card">
-            <div class="principle-number">04</div>
-            <div class="principle-title">Quarantine Defense</div>
-            <div class="principle-desc">Incomplete claims with missing timeframes or ambiguous units are quarantined to
-              prevent corrupted consensus.</div>
-          </div>
-        </div>
-
       </div>
     </section>
 
@@ -155,17 +173,33 @@
       <div class="filing-switcher-bar">
         <div class="switcher-label-wrap">
           <button class="btn btn-secondary btn-sm" onclick="showUploadPage()" title="Return to upload page">
-            ← Back to Upload
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="19" y1="12" x2="5" y2="12"></line>
+              <polyline points="12 19 5 12 12 5"></polyline>
+            </svg>
+            Back to Upload
           </button>
           <span class="switcher-tag" style="margin-left: 0.5rem;">Viewing Context:</span>
           <span class="switcher-active-title" id="activeFilingTitle">All Filings (Cross-Filing Consensus)</span>
-          <button class="btn btn-secondary btn-sm" id="btnReconcileActiveDoc" style="display: none; margin-left: 0.75rem; color: var(--accent-primary);" onclick="promptReconcileActiveDoc()" title="Re-run reconciliation with a different comparison mode">
-            ⚡ Re-run Reconciliation
+          <button class="btn btn-secondary btn-sm" id="btnReconcileActiveDoc"
+            style="display: none; margin-left: 0.75rem; color: var(--accent-primary);"
+            onclick="promptReconcileActiveDoc()" title="Re-run reconciliation with a different comparison mode">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+            Re-run Reconciliation
           </button>
         </div>
         <div class="switcher-buttons-group" id="filingSwitcherButtons">
           <button class="switcher-btn active" onclick="switchFilingFocus('all')">
-            ⊞ All Filings Combined
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="vertical-align: -2px; margin-right: 5px;">
+              <rect x="3" y="3" width="7" height="7"></rect>
+              <rect x="14" y="3" width="7" height="7"></rect>
+              <rect x="14" y="14" width="7" height="7"></rect>
+              <rect x="3" y="14" width="7" height="7"></rect>
+            </svg>
+            All Filings Combined
           </button>
         </div>
       </div>
@@ -389,48 +423,56 @@
       <div class="modal-header-clean">
         <div class="modal-badge">Reconciliation Scope</div>
         <div class="modal-title-lg">Select Processing Option</div>
-        <div class="modal-subtitle" id="reconcileTargetFilename">Choose how financial claims will be compared and reconciled:</div>
+        <div class="modal-subtitle" id="reconcileTargetFilename">Choose how financial claims will be compared and
+          reconciled:</div>
       </div>
 
       <div class="mode-options-container">
         <!-- Option 1: Combined Mode -->
         <label class="mode-option-card selected" id="optCardCombined">
-          <input type="radio" name="reconcileModeRadio" value="combined" checked onchange="handleModeOptionChange('combined')" />
+          <input type="radio" name="reconcileModeRadio" value="combined" checked
+            onchange="handleModeOptionChange('combined')" />
           <div class="mode-option-content">
             <div class="mode-option-header">
               <span class="mode-option-title">Combined (Intra + Cross-Document)</span>
               <span class="badge-accent">Recommended</span>
             </div>
             <div class="mode-option-desc">
-              Performs <strong>internal consistency checks</strong> within this filing (narrative claims vs. financial tables, sub-sectors vs. GDP) <em>and</em> cross-document reconciliation against all other filings in your repository.
+              Performs <strong>internal consistency checks</strong> within this filing (narrative claims vs. financial
+              tables, sub-sectors vs. GDP) <em>and</em> cross-document reconciliation against all other filings in your
+              repository.
             </div>
           </div>
         </label>
 
         <!-- Option 2: Intra-Document Only -->
         <label class="mode-option-card" id="optCardIntra">
-          <input type="radio" name="reconcileModeRadio" value="intra_document" onchange="handleModeOptionChange('intra_document')" />
+          <input type="radio" name="reconcileModeRadio" value="intra_document"
+            onchange="handleModeOptionChange('intra_document')" />
           <div class="mode-option-content">
             <div class="mode-option-header">
               <span class="mode-option-title">Intra-Document Only</span>
               <span class="badge-info">Internal Consistency</span>
             </div>
             <div class="mode-option-desc">
-              Reconciles facts <strong>strictly within this document</strong>. Ideal for single-filing audits to catch internal discrepancies between executive summaries, footnotes, and appendix tables.
+              Reconciles facts <strong>strictly within this document</strong>. Ideal for single-filing audits to catch
+              internal discrepancies between executive summaries, footnotes, and appendix tables.
             </div>
           </div>
         </label>
 
         <!-- Option 3: Cross-Document Only -->
         <label class="mode-option-card" id="optCardCross">
-          <input type="radio" name="reconcileModeRadio" value="cross_document" onchange="handleModeOptionChange('cross_document')" />
+          <input type="radio" name="reconcileModeRadio" value="cross_document"
+            onchange="handleModeOptionChange('cross_document')" />
           <div class="mode-option-content">
             <div class="mode-option-header">
               <span class="mode-option-title">Cross-Document Only</span>
               <span class="badge-neutral">Cross-Filing Consensus</span>
             </div>
             <div class="mode-option-desc">
-              Reconciles newly extracted facts <strong>only against other external documents</strong> in the database. Discards intra-document comparisons.
+              Reconciles newly extracted facts <strong>only against other external documents</strong> in the database.
+              Discards intra-document comparisons.
             </div>
           </div>
         </label>
@@ -439,7 +481,12 @@
       <div class="modal-footer-actions">
         <button class="btn btn-secondary" onclick="closeReconcileModal()">Cancel</button>
         <button class="btn btn-primary" id="btnConfirmReconcile" onclick="confirmAndStartProcessing()">
-          Confirm &amp; Process Filing ➔
+          Confirm &amp; Process Filing
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            style="margin-left: 5px; vertical-align: -1px;">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
         </button>
       </div>
     </div>
@@ -513,8 +560,10 @@
           </div>
         </div>
       </div>
-      <div style="margin-top: 1.5rem; display: flex; justify-content: flex-end; border-top: 1px solid var(--border-subtle); padding-top: 1rem;">
-        <button class="btn btn-secondary btn-sm" id="btnCancelProcessing" onclick="cancelActiveProcessing()" style="color: var(--color-contradicted); border-color: var(--color-contradicted-border);">
+      <div
+        style="margin-top: 1.5rem; display: flex; justify-content: flex-end; border-top: 1px solid var(--border-subtle); padding-top: 1rem;">
+        <button class="btn btn-secondary btn-sm" id="btnCancelProcessing" onclick="cancelActiveProcessing()"
+          style="color: var(--color-contradicted); border-color: var(--color-contradicted-border);">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="15" y1="9" x2="9" y2="15"></line>
