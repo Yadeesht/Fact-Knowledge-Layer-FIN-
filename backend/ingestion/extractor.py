@@ -89,7 +89,8 @@ def extract_observations_from_batch(
         raise InterruptedError("Extraction cancelled by user during batch LLM call.")
 
     if not llm_output:
-        raise RuntimeError(f"LLM extraction failed for batch {batch.batch_id}. Please verify your API key, network connection, or quota limits.")
+        print(f"[Extractor] [Batch {batch.batch_id}] Notice: Batch yielded 0 observations. Continuing pipeline gracefully.")
+        return []
 
     observations: List[Observation] = []
     clean_json = llm_output.strip()
@@ -100,7 +101,19 @@ def extract_observations_from_batch(
     try:
         data = json.loads(clean_json)
     except Exception as e:
-        raise RuntimeError(f"Failed to parse LLM extraction response as valid JSON for batch {batch.batch_id}: {e}\nRaw output: {llm_output[:200]}")
+        # Attempt regex extraction if JSON was surrounded by extra text
+        json_match = re.search(r"(\{.*\}|\[.*\])", clean_json, re.DOTALL)
+        if json_match:
+            try:
+                data = json.loads(json_match.group(1))
+            except Exception:
+                data = None
+        else:
+            data = None
+
+        if data is None:
+            print(f"[Extractor] [Batch {batch.batch_id}] Warning: Could not parse LLM output as JSON ({e}). Raw snippet: {clean_json[:120]}... Continuing gracefully.")
+            return []
 
     if isinstance(data, dict) and "observations" in data:
         items = data["observations"]

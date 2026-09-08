@@ -43,20 +43,7 @@ The dashboard will load immediately with pre-processed filings, canonical facts,
 
 ---
 
-## 2. Video Demo
-
-- **Video Demo Link**: `https://youtu.be/YOUR_DEMO_LINK_HERE` *(3 minutes or less)*
-
-### What the Demo Covers:
-1. **Filing Upload & Live Pipeline**: Dragging and dropping multi-page financial PDFs (Annual Reports, Earnings Presentations) with real-time SVG progress rings tracking PyMuPDF parsing, claim extraction, and pairwise reconciliation.
-2. **Reconciliation Scope Modal**: Choosing between Intra-document consistency, Cross-document consensus, or Combined mode.
-3. **Four Required Showcase Cases**: Walking through each required scenario with verbatim source citations, page numbers, and system mathematical reasoning.
-4. **Quarantine Audit Queue**: Demonstrating how ungrounded or ambiguous claims are safely quarantined rather than hallucinated into false consensus.
-5. **Multi-Filing Context Switcher**: Inspecting individual documents vs. the unified cross-filing knowledge layer.
-
----
-
-## 3. Approach
+## 2. Approach
 
 ### Core Philosophy: Rules-First Determinism
 Large Language Models excel at reading unstructured prose and tables, but fail unpredictably when performing arithmetic conversions (e.g. converting ₹8,142.16 Crore to Millions) or checking multi-constraint comparability. Conversely, pure graph databases create noisy, ungrounded edges between arbitrarily overlapping terms.

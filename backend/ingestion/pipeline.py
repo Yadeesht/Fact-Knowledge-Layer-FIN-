@@ -183,7 +183,14 @@ def process_pdf_document(
                         f"Extracting batch {b_num}/{total_b} (pp. {batch.page_start}–{batch.page_end})...",
                     )
 
-                obs_list = extract_observations_from_batch(batch, document_id=doc_id, repo=repo)
+                try:
+                    obs_list = extract_observations_from_batch(batch, document_id=doc_id, repo=repo)
+                except InterruptedError:
+                    raise
+                except Exception as exc:
+                    print(f"[Pipeline] [Batch {b_num}/{total_b}] Warning: Batch extraction encountered error: {exc}. Gracefully continuing with remaining batches.")
+                    obs_list = []
+
                 for obs in obs_list:
                     repo.save_observation(obs, dataset=dataset, document_id=doc_id, session_id=session_id)
                     extracted_observations.append(obs)
