@@ -3,7 +3,7 @@ import uuid
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple, Callable
 from backend.db.repository import Repository
 from backend.ingestion.pdf_parser import PyMuPDFParser
 from backend.ingestion.extractor import extract_observations_from_batch
@@ -55,6 +55,7 @@ def process_pdf_document(
     target_doc_ids: Optional[List[str]] = None,
     session_id: Optional[str] = None,
     repo: Optional[Repository] = None,
+    progress_callback: Optional[Callable[[int, int, int, int, str], None]] = None,
 ) -> Dict[str, Any]:
     """
     Synchronous end-to-end PDF processing pipeline:
@@ -99,11 +100,17 @@ def process_pdf_document(
                 f"[Pipeline] Cache hit for '{fname}' (SHA256: {file_hash[:10]}...). "
                 f"Reusing {len(extracted_observations)} pre-extracted observations and {len(chunks)} chunks from document '{doc_id}'."
             )
+            if progress_callback:
+                progress_callback(1, 100, page_count, page_count, f"Cache hit: {page_count} pages reused")
+                progress_callback(2, 100, len(extracted_observations), len(extracted_observations), f"Loaded {len(extracted_observations)} cached claims")
         else:
             doc_id = f"doc_{uuid.uuid4().hex[:8]}"
             run_id = f"run_{uuid.uuid4().hex[:8]}"
 
             # Step 1: Detect metadata and register document
+            if progress_callback:
+                progress_callback(1, 30, 0, 0, "Extracting PDF layout and metadata...")
+
             parser = PyMuPDFParser()
             meta = parser.detect_document_metadata(pdf_path)
             doc_type = meta.get("document_type", "pdf")
@@ -143,20 +150,38 @@ def process_pdf_document(
                     text=chk["text"],
                 )
 
+            if progress_callback:
+                progress_callback(1, 100, page_count, page_count, f"Parsed {page_count} pages into {len(chunks)} chunks")
+
             # Step 3 & 4: Hierarchical Batching & Observation Extraction
             batcher = HierarchicalBatcher()
             batches = batcher.build_batches(chunks, document_id=doc_id)
-            print(f"[Pipeline] Partitioned {len(chunks)} atomic chunks into {len(batches)} hierarchical LLM batches.")
+            total_b = max(1, len(batches))
+            print(f"[Pipeline] Partitioned {len(chunks)} atomic chunks into {total_b} hierarchical LLM batches.")
+
+            if progress_callback:
+                progress_callback(2, 0, 0, total_b, f"Partitioned {len(chunks)} chunks into {total_b} batches")
 
             extracted_observations = []
 
             for b_idx, batch in enumerate(batches):
                 # Check for mid-state cancellation
                 if is_cancellation_requested():
-                    raise InterruptedError(f"Processing cancelled by user at batch {b_idx + 1}/{len(batches)}.")
+                    raise InterruptedError(f"Processing cancelled by user at batch {b_idx + 1}/{total_b}.")
 
                 sec_info = f" ({batch.section})" if batch.section else ""
-                print(f"[Pipeline] [Batch {b_idx + 1}/{len(batches)}] Processing pages {batch.page_start}–{batch.page_end}{sec_info} ({len(batch.chunks)} chunks, ~{batch.total_chars} chars)...")
+                print(f"[Pipeline] [Batch {b_idx + 1}/{total_b}] Processing pages {batch.page_start}–{batch.page_end}{sec_info} ({len(batch.chunks)} chunks, ~{batch.total_chars} chars)...")
+
+                b_num = b_idx + 1
+                b_start_pct = round((b_idx / total_b) * 100)
+                if progress_callback:
+                    progress_callback(
+                        2,
+                        b_start_pct,
+                        b_idx,
+                        total_b,
+                        f"Extracting batch {b_num}/{total_b} (pp. {batch.page_start}–{batch.page_end})...",
+                    )
 
                 obs_list = extract_observations_from_batch(batch, document_id=doc_id, repo=repo)
                 for obs in obs_list:
@@ -166,59 +191,95 @@ def process_pdf_document(
                 needs_rev_cnt = sum(1 for o in obs_list if o.needs_review)
                 sample_facts = [f"{o.concept.canonical_name}: {o.value.amount} {o.value.unit or ''}".strip() for o in obs_list[:3]]
                 sample_str = f" (e.g. {', '.join(sample_facts)})" if sample_facts else ""
-                print(f"[Pipeline] [Batch {b_idx + 1}/{len(batches)}] Extracted {len(obs_list)} observation(s){sample_str} | Running Total: {len(extracted_observations)} facts ({needs_rev_cnt} flagged for review).")
+                print(f"[Pipeline] [Batch {b_idx + 1}/{total_b}] Extracted {len(obs_list)} observation(s){sample_str} | Running Total: {len(extracted_observations)} facts ({needs_rev_cnt} flagged for review).")
+
+                b_pct = round((b_num / total_b) * 100)
+                if progress_callback:
+                    progress_callback(
+                        2,
+                        b_pct,
+                        b_num,
+                        total_b,
+                        f"Batch {b_num}/{total_b} ({b_pct}%): {len(obs_list)} claims (Total: {len(extracted_observations)})",
+                    )
 
                 # Rate-limit pause between LLM batch calls
                 if b_idx < len(batches) - 1:
                     if sleep_or_cancel(1.5):
-                        raise InterruptedError(f"Processing cancelled by user after batch {b_idx + 1}/{len(batches)}.")
+                        raise InterruptedError(f"Processing cancelled by user after batch {b_idx + 1}/{total_b}.")
 
         if is_cancellation_requested():
             raise InterruptedError("Processing cancelled by user before reconciliation.")
 
         # Step 5: Scoped Candidate pairing & reconciliation
-        comparison_pool = repo.get_comparison_candidates(
-            current_doc_id=doc_id,
-            comparison_mode=comparison_mode,
-            target_doc_ids=target_doc_ids,
-        )
+        pairs_to_evaluate: List[Tuple[Any, Any]] = []
+
+        # 1. Intra-document pairing (internal consistency within this filing)
+        if comparison_mode in ("intra_document", "combined", "all"):
+            for i in range(len(extracted_observations)):
+                for j in range(i + 1, len(extracted_observations)):
+                    pairs_to_evaluate.append((extracted_observations[i], extracted_observations[j]))
+
+        # 2. Cross-document pairing (against other filings)
+        if comparison_mode in ("cross_document", "combined", "all"):
+            comparison_pool = repo.get_comparison_candidates(
+                current_doc_id=doc_id,
+                comparison_mode="cross_document",
+                target_doc_ids=target_doc_ids,
+            )
+            for new_obs in extracted_observations:
+                for cand_obs in comparison_pool:
+                    pairs_to_evaluate.append((new_obs, cand_obs))
+
+        total_pairs = max(1, len(pairs_to_evaluate))
         print(
             f"[Pipeline] Starting scoped reconciliation ({comparison_mode}): "
-            f"comparing {len(extracted_observations)} observations against {len(comparison_pool)} eligible candidate facts in comparison pool..."
+            f"evaluating {total_pairs} candidate pairs for {len(extracted_observations)} observations..."
         )
+        if progress_callback:
+            progress_callback(3, 0, 0, total_pairs, f"Evaluating {total_pairs} candidate pairs ({comparison_mode.replace('_', ' ')})...")
+
+        # Clear previous relationships for this document to avoid duplicates on re-reconciliation
+        repo.clear_relationships_for_document(doc_id)
+
         new_relationships = []
         pairs_evaluated = 0
+        step_freq = max(1, min(20, total_pairs // 20))
 
-        for new_obs in extracted_observations:
+        for obs_a, obs_b in pairs_to_evaluate:
             if is_cancellation_requested():
                 raise InterruptedError("Processing cancelled by user during reconciliation.")
 
-            for cand_obs in comparison_pool:
-                if is_cancellation_requested():
-                    raise InterruptedError("Processing cancelled by user during reconciliation.")
+            pairs_evaluated += 1
+            # Candidate Matcher Gate (Quarantine, Entity, Dimension, Scope, Time, Concept)
+            is_cand, cand_type = CandidateMatcher.is_comparable_candidate(obs_a, obs_b)
+            if not is_cand:
+                if progress_callback and (pairs_evaluated % step_freq == 0 or pairs_evaluated == total_pairs):
+                    p_pct = round((pairs_evaluated / total_pairs) * 100)
+                    progress_callback(3, p_pct, pairs_evaluated, total_pairs, f"Reconciled {pairs_evaluated}/{total_pairs} pairs ({len(new_relationships)} relations)")
+                continue
 
-                if new_obs.id != cand_obs.id:
-                    pairs_evaluated += 1
-                    # Candidate Matcher Gate (Quarantine, Entity, Dimension, Scope, Time, Concept)
-                    is_cand, cand_type = CandidateMatcher.is_comparable_candidate(new_obs, cand_obs)
-                    if not is_cand:
-                        continue
+            # Deterministic Cascade (returns None on non-comparable)
+            rel = reconcile_deterministically(obs_a, obs_b, candidate_type=cand_type)
+            if rel:
+                repo.save_relationship(rel, session_id=session_id)
+                new_relationships.append(rel)
 
-                    # Deterministic Cascade (returns None on non-comparable)
-                    rel = reconcile_deterministically(new_obs, cand_obs, candidate_type=cand_type)
-                    if rel:
-                        repo.save_relationship(rel, session_id=session_id)
-                        new_relationships.append(rel)
+            if progress_callback and (pairs_evaluated % step_freq == 0 or pairs_evaluated == total_pairs):
+                p_pct = round((pairs_evaluated / total_pairs) * 100)
+                progress_callback(3, p_pct, pairs_evaluated, total_pairs, f"Reconciled {pairs_evaluated}/{total_pairs} pairs ({len(new_relationships)} relations)")
 
         rel_breakdown = {}
         for r in new_relationships:
             k = r.relationship_type.value
             rel_breakdown[k] = rel_breakdown.get(k, 0) + 1
         breakdown_str = ", ".join(f"{cnt} {k}" for k, cnt in rel_breakdown.items()) or "none"
-        print(f"[Pipeline] Reconciliation completed: evaluated {pairs_evaluated} pairs -> generated {len(new_relationships)} relationship(s) ({breakdown_str}).")
+        print(f"[Pipeline] Reconciliation completed ({comparison_mode}): evaluated {pairs_evaluated} pairs -> generated {len(new_relationships)} relationship(s) ({breakdown_str}).")
 
         # Step 6: Complete run and save processed JSON artifact to processed/ folder
         completed_time = datetime.now(timezone.utc).isoformat()
+        if progress_callback:
+            progress_callback(4, 100, 1, 1, f"Saved processed/{doc_id}.json")
         metrics = {
             "pdf_pages_parsed": page_count,
             "chunks_created": len(chunks),
@@ -309,6 +370,115 @@ def process_pdf_document(
                 error=str(e),
             )
         raise e
+    finally:
+        if close_repo:
+            repo.close()
+
+
+def reconcile_existing_document(
+    doc_id: str,
+    comparison_mode: str = "combined",
+    target_doc_ids: Optional[List[str]] = None,
+    session_id: Optional[str] = None,
+    repo: Optional[Repository] = None,
+    progress_callback: Optional[Callable[[int, int, int, int, str], None]] = None,
+) -> Dict[str, Any]:
+    """
+    Reconciles an already processed document stored in the database with a specified mode.
+    Takes existing observations and re-runs Step 5, updating SQLite and processed/{doc_id}.json.
+    """
+    close_repo = False
+    if repo is None:
+        repo = Repository()
+        close_repo = True
+
+    try:
+        # Load observations for this document
+        doc_obs = repo.list_observations(document_id=doc_id)
+        if not doc_obs:
+            raise ValueError(f"No observations found in database for document {doc_id}.")
+
+        if progress_callback:
+            progress_callback(1, 100, 1, 1, f"Retrieved {len(doc_obs)} claims from database")
+            progress_callback(2, 100, len(doc_obs), len(doc_obs), "Validated units and temporal scope")
+
+        pairs_to_evaluate: List[Tuple[Any, Any]] = []
+
+        # 1. Intra-document pairing
+        if comparison_mode in ("intra_document", "combined", "all"):
+            for i in range(len(doc_obs)):
+                for j in range(i + 1, len(doc_obs)):
+                    pairs_to_evaluate.append((doc_obs[i], doc_obs[j]))
+
+        # 2. Cross-document pairing
+        if comparison_mode in ("cross_document", "combined", "all"):
+            comparison_pool = repo.get_comparison_candidates(
+                current_doc_id=doc_id,
+                comparison_mode="cross_document",
+                target_doc_ids=target_doc_ids,
+            )
+            for new_obs in doc_obs:
+                for cand_obs in comparison_pool:
+                    pairs_to_evaluate.append((new_obs, cand_obs))
+
+        total_pairs = max(1, len(pairs_to_evaluate))
+        if progress_callback:
+            progress_callback(3, 0, 0, total_pairs, f"Evaluating {total_pairs} candidate pairs ({comparison_mode.replace('_', ' ')})...")
+
+        # Clear previous relationships for this document
+        repo.clear_relationships_for_document(doc_id)
+
+        new_relationships = []
+        pairs_evaluated = 0
+        step_freq = max(1, min(20, total_pairs // 20))
+
+        for obs_a, obs_b in pairs_to_evaluate:
+            pairs_evaluated += 1
+            is_cand, cand_type = CandidateMatcher.is_comparable_candidate(obs_a, obs_b)
+            if not is_cand:
+                if progress_callback and (pairs_evaluated % step_freq == 0 or pairs_evaluated == total_pairs):
+                    p_pct = round((pairs_evaluated / total_pairs) * 100)
+                    progress_callback(3, p_pct, pairs_evaluated, total_pairs, f"Reconciled {pairs_evaluated}/{total_pairs} pairs ({len(new_relationships)} relations)")
+                continue
+
+            rel = reconcile_deterministically(obs_a, obs_b, candidate_type=cand_type)
+            if rel:
+                repo.save_relationship(rel, session_id=session_id)
+                new_relationships.append(rel)
+
+            if progress_callback and (pairs_evaluated % step_freq == 0 or pairs_evaluated == total_pairs):
+                p_pct = round((pairs_evaluated / total_pairs) * 100)
+                progress_callback(3, p_pct, pairs_evaluated, total_pairs, f"Reconciled {pairs_evaluated}/{total_pairs} pairs ({len(new_relationships)} relations)")
+
+        rel_breakdown = {}
+        for r in new_relationships:
+            k = r.relationship_type.value
+            rel_breakdown[k] = rel_breakdown.get(k, 0) + 1
+        breakdown_str = ", ".join(f"{cnt} {k}" for k, cnt in rel_breakdown.items()) or "none"
+        print(f"[Pipeline] Re-reconciliation completed for {doc_id} ({comparison_mode}): evaluated {pairs_evaluated} pairs -> generated {len(new_relationships)} relationship(s) ({breakdown_str}).")
+
+        # Update the JSON artifact in processed/ folder
+        from backend.processed_manager import PROCESSED_DIR
+        file_path = PROCESSED_DIR / f"{doc_id}.json"
+        if file_path.exists():
+            import json
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            data["relationships"] = [r.model_dump() for r in new_relationships]
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, default=str)
+
+        if progress_callback:
+            progress_callback(4, 100, 1, 1, f"Updated processed/{doc_id}.json")
+
+        return {
+            "status": "success",
+            "document_id": doc_id,
+            "comparison_mode": comparison_mode,
+            "pairs_evaluated": pairs_evaluated,
+            "relationships_generated": len(new_relationships),
+            "breakdown": rel_breakdown,
+        }
     finally:
         if close_repo:
             repo.close()

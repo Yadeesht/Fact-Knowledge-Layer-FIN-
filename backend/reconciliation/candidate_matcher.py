@@ -9,24 +9,35 @@ from backend.core.normalizer import normalize_fact_value
 
 MACRO_AGGREGATES = {
     "real gdp growth", "gdp growth", "real gdp growth rate",
-    "real gva growth", "gva growth", "aggregate gdp growth", "economic growth"
+    "real gva growth", "gva growth", "aggregate gdp growth", "economic growth", "national income"
 }
-MACRO_SECTOR_KEYWORDS = {"services", "manufacturing", "agriculture", "industry", "construction", "mining"}
+MACRO_SECTOR_KEYWORDS = {"services", "manufacturing", "agriculture", "industry", "construction", "mining", "electricity"}
+MACRO_DEMAND_KEYWORDS = {
+    "gfcf", "gross fixed capital formation", "capital outlay", "consumption expenditure",
+    "investment", "gross capital formation", "gcf", "saving", "household financial saving"
+}
 
 REVENUE_AGGREGATES = {"revenue", "revenue from operations", "total revenue", "total turnover", "sales"}
 REVENUE_SEGMENT_KEYWORDS = {"traded goods", "express parcel", "part truckload", "ptl", "supply chain", "freight"}
 
-INFLATION_AGGREGATES = {"headline cpi inflation", "cpi inflation", "headline inflation"}
-INFLATION_COMPONENTS = {"food inflation", "core cpi inflation", "core inflation", "fuel inflation"}
+INFLATION_AGGREGATES = {"headline cpi inflation", "cpi inflation", "headline inflation", "cpi", "inflation"}
+INFLATION_COMPONENTS = {"food inflation", "core cpi inflation", "core inflation", "fuel inflation", "services inflation", "wpi inflation", "wholesale price index"}
+
+BANKING_CREDIT_METRICS = {"credit growth", "bank credit", "non-food credit", "deposit growth", "deposits", "advances"}
+BANKING_HEALTH_METRICS = {"gross npa", "gnpa", "net npa", "nnpa", "crar", "capital adequacy", "capital to risk weighted assets", "provision coverage ratio", "pcr"}
+FISCAL_METRICS = {"fiscal deficit", "revenue deficit", "primary deficit", "tax revenue", "capex", "capital outlay"}
 
 
 def are_concepts_related_siblings(a: Observation, b: Observation) -> bool:
     """
-    Strict domain check for genuine component-aggregate or sub-metric pairs:
+    Domain check for genuine component-aggregate, sub-metric, or correlated macro/banking indicator pairs:
     1. Sector output (e.g. Services GVA growth) vs Aggregate Real GDP/GVA growth
-    2. Segment revenue (e.g. Revenue from traded goods) vs Total Revenue from operations
-    3. Component inflation (e.g. Food inflation) vs Headline CPI inflation
-    Generic token overlaps (e.g. sharing the word 'growth' or 'volume') are strictly rejected.
+    2. Investment/Demand components (e.g. GFCF) vs Aggregate GDP/GCF
+    3. Segment revenue (e.g. Revenue from traded goods) vs Total Revenue from operations
+    4. Component inflation (e.g. Food inflation) vs Headline CPI inflation
+    5. Banking credit and deposit growth pair
+    6. Asset quality & Capital adequacy metrics
+    7. Fiscal deficit / revenue balance metrics
     """
     c_a = (a.concept.canonical_name or "").lower().strip()
     c_b = (b.concept.canonical_name or "").lower().strip()
@@ -40,17 +51,42 @@ def are_concepts_related_siblings(a: Observation, b: Observation) -> bool:
     ):
         return True
 
-    # 2. Segment revenue vs Aggregate revenue from operations
+    # 2. Demand & Investment components (GFCF, consumption) vs Macro Aggregate
+    if (
+        (c_a in MACRO_AGGREGATES and any(k in c_b for k in MACRO_DEMAND_KEYWORDS))
+        or (c_b in MACRO_AGGREGATES and any(k in c_a for k in MACRO_DEMAND_KEYWORDS))
+    ):
+        return True
+
+    # 3. Segment revenue vs Aggregate revenue from operations
     if (
         (c_a in REVENUE_AGGREGATES and any(k in c_b for k in REVENUE_SEGMENT_KEYWORDS))
         or (c_b in REVENUE_AGGREGATES and any(k in c_a for k in REVENUE_SEGMENT_KEYWORDS))
     ):
         return True
 
-    # 3. Component inflation vs Headline inflation
+    # 4. Component inflation vs Headline inflation
     if (
-        (c_a in INFLATION_AGGREGATES and c_b in INFLATION_COMPONENTS)
-        or (c_b in INFLATION_AGGREGATES and c_a in INFLATION_COMPONENTS)
+        (any(k in c_a for k in INFLATION_AGGREGATES) and any(k in c_b for k in INFLATION_COMPONENTS))
+        or (any(k in c_b for k in INFLATION_AGGREGATES) and any(k in c_a for k in INFLATION_COMPONENTS))
+    ):
+        return True
+
+    # 5. Banking sector credit vs deposit dynamics
+    if (
+        any(k in c_a for k in BANKING_CREDIT_METRICS) and any(k in c_b for k in BANKING_CREDIT_METRICS)
+    ):
+        return True
+
+    # 6. Banking health & asset quality indicators (GNPA vs NNPA or CRAR)
+    if (
+        any(k in c_a for k in BANKING_HEALTH_METRICS) and any(k in c_b for k in BANKING_HEALTH_METRICS)
+    ):
+        return True
+
+    # 7. Fiscal budget metrics (deficit, capex)
+    if (
+        any(k in c_a for k in FISCAL_METRICS) and any(k in c_b for k in FISCAL_METRICS)
     ):
         return True
 

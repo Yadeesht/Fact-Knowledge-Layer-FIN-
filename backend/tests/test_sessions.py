@@ -175,9 +175,89 @@ def test_analysis_session_crud():
     repo.close()
 
 
+def test_clear_relationships_for_document():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(SCHEMA_SQL)
+    repo = Repository(db_conn=conn)
+
+    repo.save_document("doc_1", "file1.pdf", dataset="test", document_type="report", page_count=1)
+    repo.save_document("doc_2", "file2.pdf", dataset="test", document_type="report", page_count=1)
+
+    obs_1 = Observation(
+        id="obs_1",
+        entity=Entity(canonical_name="India"),
+        concept=Concept(canonical_name="real gdp growth"),
+        value=FactValue(type=ValueType.PERCENTAGE, amount=7.5, unit="%"),
+        time=TimeContext(period_type=PeriodType.FISCAL_YEAR, label="2023-24"),
+        assertion_status=AssertionStatus.ACTUAL,
+    )
+    obs_2 = Observation(
+        id="obs_2",
+        entity=Entity(canonical_name="India"),
+        concept=Concept(canonical_name="real gdp growth"),
+        value=FactValue(type=ValueType.PERCENTAGE, amount=7.5, unit="%"),
+        time=TimeContext(period_type=PeriodType.FISCAL_YEAR, label="2023-24"),
+        assertion_status=AssertionStatus.ACTUAL,
+    )
+    repo.save_observation(obs_1, document_id="doc_1")
+    repo.save_observation(obs_2, document_id="doc_2")
+
+    rel = Relationship(
+        id="rel_1_2",
+        observation_a="obs_1",
+        observation_b="obs_2",
+        relationship_type=RelationshipType.CORROBORATED,
+        confidence=1.0,
+        explanation="Exact match",
+    )
+    repo.save_relationship(rel)
+    assert len(repo.list_relationships()) == 1
+
+    # Clearing doc_1 relationships removes rel_1_2
+    repo.clear_relationships_for_document("doc_1")
+    assert len(repo.list_relationships()) == 0
+
+    repo.close()
+
+
+def test_intra_document_reconciliation():
+    from backend.reconciliation.candidate_matcher import CandidateMatcher
+    from backend.reconciliation.cascade import reconcile_deterministically
+
+    # Two observations within the same document: Real GDP growth vs Services GVA growth
+    obs_gdp = Observation(
+        id="obs_doc1_gdp",
+        entity=Entity(canonical_name="India"),
+        concept=Concept(canonical_name="real gdp growth"),
+        value=FactValue(type=ValueType.PERCENTAGE, amount=7.5, unit="%"),
+        time=TimeContext(period_type=PeriodType.FISCAL_YEAR, label="2023-24"),
+        assertion_status=AssertionStatus.ACTUAL,
+    )
+    obs_services = Observation(
+        id="obs_doc1_services",
+        entity=Entity(canonical_name="India"),
+        concept=Concept(canonical_name="services sector gva growth"),
+        value=FactValue(type=ValueType.PERCENTAGE, amount=7.9, unit="%"),
+        time=TimeContext(period_type=PeriodType.FISCAL_YEAR, label="2023-24"),
+        assertion_status=AssertionStatus.ACTUAL,
+    )
+
+    is_cand, cand_type = CandidateMatcher.is_comparable_candidate(obs_gdp, obs_services)
+    assert is_cand is True
+    assert cand_type == "related_sibling_concept"
+
+    rel = reconcile_deterministically(obs_gdp, obs_services, candidate_type=cand_type)
+    assert rel is not None
+    assert rel.relationship_type == RelationshipType.APPARENT_CONTRADICTION
+    assert "Component vs Aggregate" in rel.explanation
+
+
 if __name__ == "__main__":
     test_document_sha256_caching()
     test_relational_observation_linking()
     test_scoped_comparison_candidates()
     test_analysis_session_crud()
-    print("All session and caching tests passed successfully!")
+    test_clear_relationships_for_document()
+    test_intra_document_reconciliation()
+    print("All session, caching, and reconciliation mode tests passed successfully!")

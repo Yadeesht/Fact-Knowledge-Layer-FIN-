@@ -636,10 +636,25 @@ class Repository:
                 ),
             )
 
+    def clear_relationships_for_document(self, doc_id: str) -> None:
+        """
+        Clears all relationships involving observations of the specified document.
+        """
+        with self.conn:
+            self.conn.execute(
+                """
+                DELETE FROM relationships
+                WHERE observation_a IN (SELECT id FROM observations WHERE document_id = ?)
+                   OR observation_b IN (SELECT id FROM observations WHERE document_id = ?)
+                """,
+                (doc_id, doc_id),
+            )
+
     def list_relationships(
         self,
         rel_type: Optional[RelationshipType] = None,
         session_id: Optional[str] = None,
+        document_id: Optional[str] = None,
     ) -> List[Relationship]:
         query = "SELECT * FROM relationships WHERE 1=1"
         params = []
@@ -649,6 +664,12 @@ class Repository:
         if session_id:
             query += " AND session_id = ?"
             params.append(session_id)
+        if document_id and document_id != "all":
+            query += """ AND (
+                observation_a IN (SELECT id FROM observations WHERE document_id = ?)
+                OR observation_b IN (SELECT id FROM observations WHERE document_id = ?)
+            )"""
+            params.extend([document_id, document_id])
 
         cursor = self.conn.execute(query, params)
         rows = cursor.fetchall()

@@ -23,7 +23,7 @@ from backend.reconciliation.cascade import reconcile_deterministically
 from backend.reconciliation.llm_judge import reconcile_with_llm
 from backend.reconciliation.candidate_matcher import CandidateMatcher
 from backend.ingestion.extractor import extract_observations_from_text
-from backend.ingestion.pipeline import process_pdf_document, request_pipeline_cancellation
+from backend.ingestion.pipeline import process_pdf_document, request_pipeline_cancellation, reconcile_existing_document
 from backend.core.llm_client import get_llm_credentials
 
 app = FastAPI(
@@ -90,13 +90,40 @@ def get_app_config():
 
 
 # -------------------------------------------------------------
+# Global Ingestion & Reconciliation Progress Tracking
+# -------------------------------------------------------------
+PROGRESS_STATE: Dict[str, Any] = {
+    "active": False,
+    "step": 1,
+    "percent": 0,
+    "current": 0,
+    "total": 0,
+    "message": "",
+}
+
+
+def update_pipeline_progress(step: int, percent: int, current: int, total: int, message: str):
+    PROGRESS_STATE["active"] = True
+    PROGRESS_STATE["step"] = step
+    PROGRESS_STATE["percent"] = percent
+    PROGRESS_STATE["current"] = current
+    PROGRESS_STATE["total"] = total
+    PROGRESS_STATE["message"] = message
+
+
+@app.get("/api/progress")
+def get_pipeline_progress():
+    return PROGRESS_STATE
+
+
+# -------------------------------------------------------------
 # 1. Documents API (§11)
 # -------------------------------------------------------------
 @app.post("/documents")
 @app.post("/api/documents")
 def upload_document(
     file: UploadFile = File(...),
-    comparison_mode: str = Query("cross_document"),
+    comparison_mode: str = Query("combined"),
     target_doc_ids: Optional[str] = Query(None),
     session_id: Optional[str] = Query(None),
 ):
@@ -112,6 +139,7 @@ def upload_document(
 
     targets = [t.strip() for t in target_doc_ids.split(",") if t.strip()] if target_doc_ids else None
 
+    update_pipeline_progress(1, 15, 0, 0, f"Saved upload: {file.filename}")
     repo = Repository()
     try:
         result = process_pdf_document(
@@ -121,6 +149,7 @@ def upload_document(
             target_doc_ids=targets,
             session_id=session_id,
             repo=repo,
+            progress_callback=update_pipeline_progress,
         )
         return result
     except InterruptedError:
@@ -128,12 +157,95 @@ def upload_document(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
     finally:
+        PROGRESS_STATE["active"] = False
+        repo.close()
+
+
+@app.post("/api/documents/batch")
+def upload_documents_batch(
+    files: List[UploadFile] = File(...),
+    comparison_mode: str = Query("combined"),
+    session_id: Optional[str] = Query(None),
+):
+    """
+    POST /api/documents/batch: Upload multiple PDFs simultaneously and process them in sequence.
+    Each newly ingested document automatically reconciles against previously ingested filings.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided.")
+
+    results = []
+    repo = Repository()
+    try:
+        total_files = len(files)
+        for idx, f in enumerate(files):
+            if not f.filename.lower().endswith(".pdf"):
+                continue
+            saved_path = UPLOADS_DIR / f.filename
+            with open(saved_path, "wb") as out:
+                shutil.copyfileobj(f.file, out)
+
+            prefix = f"[{idx + 1}/{total_files}] " if total_files > 1 else ""
+
+            def batch_progress_cb(step: int, percent: int, current: int, total: int, message: str):
+                update_pipeline_progress(step, percent, current, total, f"{prefix}{message}")
+
+            update_pipeline_progress(1, 10, idx, total_files, f"{prefix}Preparing {f.filename}...")
+            res = process_pdf_document(
+                pdf_path=saved_path,
+                filename=f.filename,
+                comparison_mode=comparison_mode,
+                session_id=session_id,
+                repo=repo,
+                progress_callback=batch_progress_cb,
+            )
+            results.append(res)
+        return {"status": "success", "processed_count": len(results), "documents": results}
+    except InterruptedError:
+        return {"status": "cancelled", "message": "Batch document processing was cancelled by user."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Batch ingestion failed: {str(e)}")
+    finally:
+        PROGRESS_STATE["active"] = False
+        repo.close()
+
+
+@app.post("/api/documents/{doc_id}/reconcile")
+def re_reconcile_document_endpoint(
+    doc_id: str,
+    comparison_mode: str = Query("combined"),
+    target_doc_ids: Optional[str] = Query(None),
+    session_id: Optional[str] = Query(None),
+):
+    """
+    Re-runs reconciliation for an already ingested document using a specific comparison mode
+    ('combined', 'intra_document', 'cross_document').
+    """
+    targets = [t.strip() for t in target_doc_ids.split(",") if t.strip()] if target_doc_ids else None
+    update_pipeline_progress(1, 15, 0, 0, f"Initializing re-reconciliation for {doc_id}...")
+    repo = Repository()
+    try:
+        result = reconcile_existing_document(
+            doc_id=doc_id,
+            comparison_mode=comparison_mode,
+            target_doc_ids=targets,
+            session_id=session_id,
+            repo=repo,
+            progress_callback=update_pipeline_progress,
+        )
+        return result
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Re-reconciliation failed: {str(e)}")
+    finally:
+        PROGRESS_STATE["active"] = False
         repo.close()
 
 
 class StarterIngestRequest(BaseModel):
     filename: str
-    comparison_mode: str = "cross_document"
+    comparison_mode: str = "combined"
     target_doc_ids: Optional[List[str]] = None
     session_id: Optional[str] = None
 
@@ -182,6 +294,7 @@ def ingest_starter_file(req: StarterIngestRequest):
         raise HTTPException(status_code=404, detail=f"Starter file {req.filename} not found.")
 
     dataset = "delhivery" if "delhivery" in str(target_path).lower() else "india-macroeconomy"
+    update_pipeline_progress(1, 15, 0, 0, f"Loading starter file {req.filename}...")
     repo = Repository()
     try:
         result = process_pdf_document(
@@ -192,6 +305,7 @@ def ingest_starter_file(req: StarterIngestRequest):
             target_doc_ids=req.target_doc_ids,
             session_id=req.session_id,
             repo=repo,
+            progress_callback=update_pipeline_progress,
         )
         return result
     except InterruptedError:
@@ -199,6 +313,7 @@ def ingest_starter_file(req: StarterIngestRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
     finally:
+        PROGRESS_STATE["active"] = False
         repo.close()
 
 
@@ -406,13 +521,16 @@ def get_canonical_facts():
 # -------------------------------------------------------------
 @app.get("/relationships")
 @app.get("/api/relationships")
-def get_relationships(relationship_type: Optional[RelationshipType] = None):
+def get_relationships(
+    relationship_type: Optional[RelationshipType] = None,
+    document_id: Optional[str] = None,
+):
     """
-    GET /relationships (§11): Filterable by relationship_type.
+    GET /relationships (§11): Filterable by relationship_type and document_id.
     """
     repo = Repository()
     try:
-        rels = repo.list_relationships(rel_type=relationship_type)
+        rels = repo.list_relationships(rel_type=relationship_type, document_id=document_id)
         return [r.dict() for r in rels]
     finally:
         repo.close()
@@ -497,18 +615,61 @@ def get_all_entities():
 # 6. Evaluator Showcase Cases
 # -------------------------------------------------------------
 @app.get("/api/showcase")
-def get_showcase_cases():
+def get_showcase_cases(document_id: Optional[str] = None):
     repo = Repository()
     try:
+        # Dynamic showcase built from processed files in database
+        rels = repo.list_relationships(document_id=document_id)
+        obs_filter = [o for o in repo.list_observations()]
+        if document_id and document_id != "all":
+            obs_filter = [
+                o for o in obs_filter
+                if any(ev.document_id == document_id for ev in (o.evidence or []))
+            ]
+        all_obs = {o.id: o for o in obs_filter}
+
+        dynamic_cases = []
+        for rel in rels:
+            obs_a = all_obs.get(rel.observation_a) or repo.get_observation(rel.observation_a)
+            obs_b = all_obs.get(rel.observation_b) or repo.get_observation(rel.observation_b)
+            if not obs_a or not obs_b:
+                continue
+
+            rel_type = rel.relationship_type.value if hasattr(rel.relationship_type, "value") else str(rel.relationship_type)
+            badge = rel_type.replace("_", " ").upper()
+            dynamic_cases.append({
+                "case_id": f"case_{rel.id}",
+                "title": f"Reconciliation ({rel_type.replace('_', ' ').title()}): {obs_a.entity.canonical_name} - {obs_a.concept.canonical_name}",
+                "badge": badge,
+                "category": rel_type.lower(),
+                "takeaway": rel.explanation,
+                "observation_a": obs_a.dict(),
+                "observation_b": obs_b.dict(),
+                "relationship": rel.dict(),
+            })
+
+        review_obs = [o for o in all_obs.values() if o.needs_review]
+        for obs in review_obs[:10]:
+            dynamic_cases.append({
+                "case_id": f"review_{obs.id}",
+                "title": f"Anomaly Escalation: {obs.entity.canonical_name} - {obs.concept.canonical_name}",
+                "badge": "NEEDS REVIEW",
+                "category": "needs_review",
+                "takeaway": "Extraction quarantined due to missing or ambiguous attributes.",
+                "observation": obs.dict(),
+                "review_reason": obs.review_reason or "Ambiguous attributes",
+            })
+
+        if dynamic_cases:
+            return dynamic_cases
+
+        # Fallback to hardcoded demo cases if no dynamic cases found
         case1_a = repo.get_observation("obs_del_rev_fy24_ar")
         case1_b = repo.get_observation("obs_del_rev_fy24_pres")
-
         case2_a = repo.get_observation("obs_ind_gdp_fy25_survey")
         case2_b = repo.get_observation("obs_ind_gdp_fy25_conflict")
-
         case3_a = repo.get_observation("obs_ind_gdp_fy25_survey_est")
         case3_b = repo.get_observation("obs_ind_gdp_fy25_imf_forecast")
-
         case4 = repo.get_observation("obs_del_pincodes_ambiguous")
 
         if case1_a and case1_b:
@@ -567,42 +728,7 @@ def get_showcase_cases():
             ]
             return [c for c in cases if c.get("observation_a") or c.get("observation")]
 
-        # Dynamic showcase built from processed files in database
-        rels = repo.list_relationships()
-        all_obs = {o.id: o for o in repo.list_observations()}
-        dynamic_cases = []
-
-        for rel in rels:
-            obs_a = all_obs.get(rel.observation_a)
-            obs_b = all_obs.get(rel.observation_b)
-            if not obs_a or not obs_b:
-                continue
-
-            rel_type = rel.relationship_type.value if hasattr(rel.relationship_type, "value") else str(rel.relationship_type)
-            dynamic_cases.append({
-                "case_id": f"case_{rel.id}",
-                "title": f"Reconciliation ({rel_type.title()}): {obs_a.entity.canonical_name} - {obs_a.concept.canonical_name}",
-                "badge": rel_type.upper(),
-                "category": rel_type.lower(),
-                "takeaway": rel.explanation,
-                "observation_a": obs_a.dict(),
-                "observation_b": obs_b.dict(),
-                "relationship": rel.dict(),
-            })
-
-        review_obs = [o for o in all_obs.values() if o.needs_review]
-        for obs in review_obs:
-            dynamic_cases.append({
-                "case_id": f"review_{obs.id}",
-                "title": f"Anomaly Escalation: {obs.entity.canonical_name} - {obs.concept.canonical_name}",
-                "badge": "NEEDS REVIEW",
-                "category": "needs_review",
-                "takeaway": "Extraction quarantined due to missing or ambiguous attributes.",
-                "observation": obs.dict(),
-                "review_reason": obs.review_reason or "Ambiguous attributes",
-            })
-
-        return dynamic_cases
+        return []
     finally:
         repo.close()
 

@@ -40,7 +40,7 @@
           <span id="apiStatusText">Engine Ready</span>
         </div>
 
-        <input type="file" id="pdfFileInput" accept=".pdf" style="display:none;" onchange="handlePDFUpload(event)" />
+        <input type="file" id="pdfFileInput" accept=".pdf" multiple style="display:none;" onchange="handlePDFUpload(event)" />
 
         <button class="btn btn-secondary" id="btnBackToUpload" onclick="showUploadPage()" style="display: none;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -69,7 +69,7 @@
       <div class="hero-container">
 
         <div class="hero-badge">Evidence-Grounded Knowledge Engine</div>
-        <h1 class="hero-title">Upload Financial Filing</h1>
+        <h1 class="hero-title">Upload Financial Filings</h1>
         <p class="hero-description">
           Extract atomic claims, normalize currency &amp; fiscal periods, and reconcile cross-filing facts using a
           deterministic rules-first cascade.
@@ -85,11 +85,10 @@
               <line x1="9" y1="15" x2="15" y2="15"></line>
             </svg>
           </div>
-          <div class="upload-text-main">Drop financial PDF filing here, or click to browse</div>
-          <div class="upload-text-sub">Supports Annual Reports, Earnings Presentations, IPO Prospectuses &amp;
-            Macroeconomic Excerpts</div>
+          <div class="upload-text-main">Drop one or multiple financial PDF filings here, or click to browse</div>
+          <div class="upload-text-sub">Select single or multiple PDFs simultaneously (Annual Reports, Earnings Presentations, IPO Prospectuses)</div>
           <div class="upload-btn-wrapper">
-            <span class="btn btn-primary btn-sm">Select PDF File</span>
+            <span class="btn btn-primary btn-sm">Select PDF File(s)</span>
           </div>
         </div>
 
@@ -160,6 +159,9 @@
           </button>
           <span class="switcher-tag" style="margin-left: 0.5rem;">Viewing Context:</span>
           <span class="switcher-active-title" id="activeFilingTitle">All Filings (Cross-Filing Consensus)</span>
+          <button class="btn btn-secondary btn-sm" id="btnReconcileActiveDoc" style="display: none; margin-left: 0.75rem; color: var(--accent-primary);" onclick="promptReconcileActiveDoc()" title="Re-run reconciliation with a different comparison mode">
+            ⚡ Re-run Reconciliation
+          </button>
         </div>
         <div class="switcher-buttons-group" id="filingSwitcherButtons">
           <button class="switcher-btn active" onclick="switchFilingFocus('all')">
@@ -344,9 +346,10 @@
               oninput="filterRelationships()" />
             <select class="select-filter" id="relTypeFilter" onchange="filterRelationships()">
               <option value="all">All Verdicts</option>
-              <option value="corroborates">Corroborates</option>
-              <option value="contradicts">Contradicts</option>
-              <option value="contextualizes">Contextualizes</option>
+              <option value="corroborated">Corroborated</option>
+              <option value="contradicted">Contradicted</option>
+              <option value="apparent_contradiction">Apparent Contradiction</option>
+              <option value="contextualized">Contextualized</option>
             </select>
           </div>
         </div>
@@ -380,32 +383,134 @@
 
   </main>
 
+  <!-- Reconciliation Mode Selection Modal Prompt -->
+  <div class="modal-backdrop" id="reconcileModeModal">
+    <div class="modal-card modal-card-wide">
+      <div class="modal-header-clean">
+        <div class="modal-badge">Reconciliation Scope</div>
+        <div class="modal-title-lg">Select Processing Option</div>
+        <div class="modal-subtitle" id="reconcileTargetFilename">Choose how financial claims will be compared and reconciled:</div>
+      </div>
+
+      <div class="mode-options-container">
+        <!-- Option 1: Combined Mode -->
+        <label class="mode-option-card selected" id="optCardCombined">
+          <input type="radio" name="reconcileModeRadio" value="combined" checked onchange="handleModeOptionChange('combined')" />
+          <div class="mode-option-content">
+            <div class="mode-option-header">
+              <span class="mode-option-title">Combined (Intra + Cross-Document)</span>
+              <span class="badge-accent">Recommended</span>
+            </div>
+            <div class="mode-option-desc">
+              Performs <strong>internal consistency checks</strong> within this filing (narrative claims vs. financial tables, sub-sectors vs. GDP) <em>and</em> cross-document reconciliation against all other filings in your repository.
+            </div>
+          </div>
+        </label>
+
+        <!-- Option 2: Intra-Document Only -->
+        <label class="mode-option-card" id="optCardIntra">
+          <input type="radio" name="reconcileModeRadio" value="intra_document" onchange="handleModeOptionChange('intra_document')" />
+          <div class="mode-option-content">
+            <div class="mode-option-header">
+              <span class="mode-option-title">Intra-Document Only</span>
+              <span class="badge-info">Internal Consistency</span>
+            </div>
+            <div class="mode-option-desc">
+              Reconciles facts <strong>strictly within this document</strong>. Ideal for single-filing audits to catch internal discrepancies between executive summaries, footnotes, and appendix tables.
+            </div>
+          </div>
+        </label>
+
+        <!-- Option 3: Cross-Document Only -->
+        <label class="mode-option-card" id="optCardCross">
+          <input type="radio" name="reconcileModeRadio" value="cross_document" onchange="handleModeOptionChange('cross_document')" />
+          <div class="mode-option-content">
+            <div class="mode-option-header">
+              <span class="mode-option-title">Cross-Document Only</span>
+              <span class="badge-neutral">Cross-Filing Consensus</span>
+            </div>
+            <div class="mode-option-desc">
+              Reconciles newly extracted facts <strong>only against other external documents</strong> in the database. Discards intra-document comparisons.
+            </div>
+          </div>
+        </label>
+      </div>
+
+      <div class="modal-footer-actions">
+        <button class="btn btn-secondary" onclick="closeReconcileModal()">Cancel</button>
+        <button class="btn btn-primary" id="btnConfirmReconcile" onclick="confirmAndStartProcessing()">
+          Confirm &amp; Process Filing ➔
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Processing Progress Modal -->
   <div class="modal-backdrop" id="processingModal">
     <div class="modal-card">
       <div class="modal-header">
-        <div class="spinner"></div>
-        <div>
+        <div class="modal-pipeline-badge">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+        </div>
+        <div style="flex: 1;">
           <div class="modal-title" id="procModalTitle">Ingesting Filing...</div>
           <div class="modal-subtitle" id="procModalFilename">Processing document pipeline</div>
         </div>
       </div>
       <div class="stepper-list">
         <div class="stepper-item active" id="step1">
-          <span class="step-bullet">1</span>
-          <span class="step-text">PyMuPDF Layout-Aware Parsing &amp; Table Chunking</span>
+          <div class="step-progress-wrapper">
+            <svg class="step-progress-ring" viewBox="0 0 36 36">
+              <circle class="step-ring-bg" cx="18" cy="18" r="14"></circle>
+              <circle class="step-ring-bar" id="stepRing1" cx="18" cy="18" r="14"></circle>
+            </svg>
+            <span class="step-ring-label" id="stepLabel1">0%</span>
+          </div>
+          <div class="step-content">
+            <span class="step-text">PyMuPDF Layout Parsing &amp; Chunking</span>
+            <span class="step-status-sub" id="stepSub1">Initializing layout engine...</span>
+          </div>
         </div>
         <div class="stepper-item" id="step2">
-          <span class="step-bullet">2</span>
-          <span class="step-text">Atomic Claim Extraction &amp; Unit Normalization</span>
+          <div class="step-progress-wrapper">
+            <svg class="step-progress-ring" viewBox="0 0 36 36">
+              <circle class="step-ring-bg" cx="18" cy="18" r="14"></circle>
+              <circle class="step-ring-bar" id="stepRing2" cx="18" cy="18" r="14"></circle>
+            </svg>
+            <span class="step-ring-label" id="stepLabel2">2</span>
+          </div>
+          <div class="step-content">
+            <span class="step-text">Atomic Claim Extraction &amp; Normalization</span>
+            <span class="step-status-sub" id="stepSub2">Waiting...</span>
+          </div>
         </div>
         <div class="stepper-item" id="step3">
-          <span class="step-bullet">3</span>
-          <span class="step-text">Deterministic Rules Cascade Reconciliation</span>
+          <div class="step-progress-wrapper">
+            <svg class="step-progress-ring" viewBox="0 0 36 36">
+              <circle class="step-ring-bg" cx="18" cy="18" r="14"></circle>
+              <circle class="step-ring-bar" id="stepRing3" cx="18" cy="18" r="14"></circle>
+            </svg>
+            <span class="step-ring-label" id="stepLabel3">3</span>
+          </div>
+          <div class="step-content">
+            <span class="step-text">Cascade Reconciliation &amp; Intra-Doc Checks</span>
+            <span class="step-status-sub" id="stepSub3">Waiting...</span>
+          </div>
         </div>
         <div class="stepper-item" id="step4">
-          <span class="step-bullet">4</span>
-          <span class="step-text">Saving Processed JSON Artifact to <code>processed/</code></span>
+          <div class="step-progress-wrapper">
+            <svg class="step-progress-ring" viewBox="0 0 36 36">
+              <circle class="step-ring-bg" cx="18" cy="18" r="14"></circle>
+              <circle class="step-ring-bar" id="stepRing4" cx="18" cy="18" r="14"></circle>
+            </svg>
+            <span class="step-ring-label" id="stepLabel4">4</span>
+          </div>
+          <div class="step-content">
+            <span class="step-text">Saving Processed JSON Artifact to <code>processed/</code></span>
+            <span class="step-status-sub" id="stepSub4">Waiting...</span>
+          </div>
         </div>
       </div>
       <div style="margin-top: 1.5rem; display: flex; justify-content: flex-end; border-top: 1px solid var(--border-subtle); padding-top: 1rem;">

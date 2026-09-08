@@ -158,8 +158,8 @@ async function openDashboardWithFiling(docId) {
 }
 
 async function loadActiveData() {
+  await loadObservations(currentDocFilter);
   await Promise.all([
-    loadObservations(currentDocFilter),
     loadRelationships(currentDocFilter),
     loadGroupedFacts(),
     loadShowcaseCases(),
@@ -217,9 +217,14 @@ async function loadProcessedFilesList() {
               <span class="stat-pill">${f.page_count || 1} pages</span>
             </div>
           </div>
-          <button class="btn btn-secondary btn-sm" style="flex-shrink: 0;" onclick="event.stopPropagation(); openDashboardWithFiling('${f.doc_id}')">
-            Inspect ➔
-          </button>
+          <div style="display: flex; gap: 0.4rem; flex-shrink: 0;" onclick="event.stopPropagation();">
+            <button class="btn btn-secondary btn-sm" onclick="promptReconciliationForExisting('${f.doc_id}', '${f.filename}')" title="Re-run reconciliation with specific mode">
+              ⚡ Reconcile
+            </button>
+            <button class="btn btn-primary btn-sm" onclick="openDashboardWithFiling('${f.doc_id}')">
+              Inspect ➔
+            </button>
+          </div>
         </div>
       `;
     });
@@ -269,6 +274,11 @@ async function switchFilingFocus(docId) {
     }
   }
 
+  const btnReconcile = document.getElementById("btnReconcileActiveDoc");
+  if (btnReconcile) {
+    btnReconcile.style.display = (docId && docId !== "all") ? "inline-flex" : "none";
+  }
+
   renderFilingSwitcher();
   await loadActiveData();
 }
@@ -309,30 +319,137 @@ async function loadStarterFiles() {
   }
 }
 
-// -----------------------------------------------------------------
+// -------------------------------------------------------------
 // Processing Pipeline Stepper & Ingestion
-// -----------------------------------------------------------------
+// -------------------------------------------------------------
 let activeAbortController = null;
 let stepperTimers = [];
+let progressPollInterval = null;
+const CIRCUMFERENCE = 88; // 2 * pi * 14
 
 function clearStepperTimers() {
-  stepperTimers.forEach(id => clearTimeout(id));
+  stepperTimers.forEach(id => {
+    clearTimeout(id);
+    clearInterval(id);
+  });
   stepperTimers = [];
+}
+
+function startProgressPolling() {
+  stopProgressPolling();
+  progressPollInterval = setInterval(async () => {
+    try {
+      const res = await fetch(api("/api/progress"));
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || !data.active) return;
+
+      const { step, percent, message } = data;
+
+      // Mark preceding steps as completed (100% and checkmark)
+      for (let s = 1; s < step; s++) {
+        setStepProgress(s, 100);
+        const st = document.getElementById(`step${s}`);
+        if (st) {
+          st.classList.remove("active");
+          st.classList.add("completed");
+        }
+        const lbl = document.getElementById(`stepLabel${s}`);
+        if (lbl) lbl.innerText = "✓";
+      }
+
+      // Mark current step active and update ring & text
+      const curStep = document.getElementById(`step${step}`);
+      if (curStep) {
+        curStep.classList.add("active");
+        curStep.classList.remove("completed");
+      }
+      setStepProgress(step, percent, message);
+    } catch (e) {
+      // Ignore polling connection glitches
+    }
+  }, 250);
+}
+
+function stopProgressPolling() {
+  if (progressPollInterval) {
+    clearInterval(progressPollInterval);
+    progressPollInterval = null;
+  }
+}
+
+function setStepProgress(stepNum, percent, statusText) {
+  const bar = document.getElementById(`stepRing${stepNum}`);
+  const label = document.getElementById(`stepLabel${stepNum}`);
+  const sub = document.getElementById(`stepSub${stepNum}`);
+  const step = document.getElementById(`step${stepNum}`);
+
+  const p = Math.max(0, Math.min(100, Math.round(percent)));
+  const offset = CIRCUMFERENCE - (p / 100) * CIRCUMFERENCE;
+
+  if (bar) {
+    bar.style.strokeDashoffset = offset;
+  }
+  if (label) {
+    if (p >= 100) {
+      label.innerText = "✓";
+    } else {
+      label.innerText = `${p}%`;
+    }
+  }
+  if (sub && statusText) {
+    sub.innerText = statusText;
+  }
+  if (step) {
+    if (p >= 100) {
+      step.classList.remove("active");
+      step.classList.add("completed");
+    } else {
+      step.classList.add("active");
+      step.classList.remove("completed");
+    }
+  }
+}
+
+function animateStepProgress(stepNum, fromPercent, toPercent, durationMs, statusText) {
+  const startTime = Date.now();
+  const sub = document.getElementById(`stepSub${stepNum}`);
+  if (sub && statusText) sub.innerText = statusText;
+
+  const timer = setInterval(() => {
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min(1, elapsed / durationMs);
+    const currentPercent = fromPercent + (toPercent - fromPercent) * progress;
+    setStepProgress(stepNum, currentPercent);
+
+    if (progress >= 1) {
+      clearInterval(timer);
+      const idx = stepperTimers.indexOf(timer);
+      if (idx !== -1) stepperTimers.splice(idx, 1);
+    }
+  }, 40);
+
+  stepperTimers.push(timer);
+  return timer;
 }
 
 function showProcessingModal(filename) {
   clearStepperTimers();
+  stopProgressPolling();
   const modal = document.getElementById("processingModal");
   const sub = document.getElementById("procModalFilename");
   if (sub) sub.innerText = filename;
   if (modal) modal.classList.add("show");
 
   resetStepper();
-  advanceStep(1);
+  advanceStep(1, "Parsing layout & extracting tables...");
+  setStepProgress(1, 15, "Parsing layout & extracting tables...");
+  startProgressPolling();
 }
 
 function hideProcessingModal() {
   clearStepperTimers();
+  stopProgressPolling();
   const modal = document.getElementById("processingModal");
   if (modal) modal.classList.remove("show");
   activeAbortController = null;
@@ -340,6 +457,7 @@ function hideProcessingModal() {
 
 async function cancelActiveProcessing() {
   if (confirm("Are you sure you want to stop processing this filing?")) {
+    stopProgressPolling();
     // 1. Immediately abort client fetch request
     if (activeAbortController) {
       activeAbortController.abort();
@@ -363,95 +481,213 @@ async function cancelActiveProcessing() {
 }
 
 function resetStepper() {
+  clearStepperTimers();
+  stopProgressPolling();
   for (let i = 1; i <= 4; i++) {
     const step = document.getElementById(`step${i}`);
-    if (step) {
-      step.classList.remove("active", "completed");
-    }
+    const bar = document.getElementById(`stepRing${i}`);
+    const label = document.getElementById(`stepLabel${i}`);
+    const sub = document.getElementById(`stepSub${i}`);
+
+    if (step) step.classList.remove("active", "completed");
+    if (bar) bar.style.strokeDashoffset = CIRCUMFERENCE;
+    if (label) label.innerText = `${i}`;
+    if (sub) sub.innerText = "Waiting...";
   }
 }
 
-function advanceStep(num) {
+function advanceStep(num, statusText) {
   for (let i = 1; i < num; i++) {
     const step = document.getElementById(`step${i}`);
+    const bar = document.getElementById(`stepRing${i}`);
+    const label = document.getElementById(`stepLabel${i}`);
+    const sub = document.getElementById(`stepSub${i}`);
+
     if (step) {
       step.classList.remove("active");
       step.classList.add("completed");
     }
+    if (bar) bar.style.strokeDashoffset = 0;
+    if (label) label.innerText = "✓";
+    if (sub) sub.innerText = "Completed";
   }
+
   const current = document.getElementById(`step${num}`);
   if (current) {
     current.classList.add("active");
+    current.classList.remove("completed");
+  }
+  if (statusText) {
+    const sub = document.getElementById(`stepSub${num}`);
+    if (sub) sub.innerText = statusText;
+  }
+}
+
+// -----------------------------------------------------------------
+// Reconciliation Prompt Modal & Processing Control
+// -----------------------------------------------------------------
+let pendingProcessingTarget = null;
+
+function handleModeOptionChange(mode) {
+  const cards = {
+    combined: document.getElementById("optCardCombined"),
+    intra_document: document.getElementById("optCardIntra"),
+    cross_document: document.getElementById("optCardCross"),
+  };
+  Object.keys(cards).forEach(k => {
+    if (cards[k]) {
+      if (k === mode) {
+        cards[k].classList.add("selected");
+      } else {
+        cards[k].classList.remove("selected");
+      }
+    }
+  });
+}
+
+function openReconcileModal(target, displayName) {
+  pendingProcessingTarget = target;
+  const filenameEl = document.getElementById("reconcileTargetFilename");
+  if (filenameEl) {
+    if (target.type === "batch_upload" && target.files && target.files.length > 1) {
+      const fileNames = target.files.map(f => f.name).join(", ");
+      filenameEl.innerHTML = `Target: <strong>${target.files.length} Filings Selected</strong> (<span style="font-size:0.75rem; color:var(--text-tertiary);" title="${fileNames}">${fileNames.length > 65 ? fileNames.substring(0, 62) + '...' : fileNames}</span>) — Select reconciliation scope:`;
+    } else {
+      filenameEl.innerHTML = `Target filing: <strong>${displayName}</strong> — Select reconciliation scope:`;
+    }
+  }
+
+  // Default to combined
+  const radio = document.querySelector('input[name="reconcileModeRadio"][value="combined"]');
+  if (radio) radio.checked = true;
+  handleModeOptionChange("combined");
+
+  const modal = document.getElementById("reconcileModeModal");
+  if (modal) modal.classList.add("show");
+}
+
+function closeReconcileModal() {
+  const modal = document.getElementById("reconcileModeModal");
+  if (modal) modal.classList.remove("show");
+  pendingProcessingTarget = null;
+}
+
+function promptReconciliationForExisting(docId, filename) {
+  openReconcileModal({ type: "reconcile_existing", docId, filename }, filename);
+}
+
+function promptReconcileActiveDoc() {
+  if (!currentDocFilter || currentDocFilter === "all") return;
+  const doc = allDocuments.find(d => d.id === currentDocFilter) || processedFiles.find(f => f.doc_id === currentDocFilter);
+  const name = doc ? doc.filename : currentDocFilter;
+  promptReconciliationForExisting(currentDocFilter, name);
+}
+
+async function confirmAndStartProcessing() {
+  const selectedRadio = document.querySelector('input[name="reconcileModeRadio"]:checked');
+  const mode = selectedRadio ? selectedRadio.value : "combined";
+  const target = pendingProcessingTarget;
+  closeReconcileModal();
+
+  if (!target) return;
+
+  if (target.type === "batch_upload" || target.type === "upload") {
+    const files = target.files || (target.file ? [target.file] : []);
+    await executeBatchPDFUpload(files, mode);
+  } else if (target.type === "starter") {
+    await executeStarterIngest(target.filename, mode);
+  } else if (target.type === "reconcile_existing") {
+    await executeReconcileExisting(target.docId, target.filename, mode);
   }
 }
 
 async function handlePDFUpload(event) {
-  const file = event.target.files[0];
-  if (!file) return;
+  const rawFiles = event.target.files;
+  if (!rawFiles || rawFiles.length === 0) return;
 
-  if (!file.name.toLowerCase().endsWith(".pdf")) {
-    alert("Please upload a PDF file.");
+  const files = Array.from(rawFiles).filter(f => f.name.toLowerCase().endsWith(".pdf"));
+  if (files.length === 0) {
+    alert("Please select valid PDF file(s).");
     return;
   }
 
-  showProcessingModal(file.name);
-  advanceStep(1);
-
-  const formData = new FormData();
-  formData.append("file", file);
-
-  activeAbortController = new AbortController();
-
-  try {
-    stepperTimers.push(setTimeout(() => advanceStep(2), 700));
-    stepperTimers.push(setTimeout(() => advanceStep(3), 1500));
-
-    const res = await fetch(api("/api/documents"), {
-      method: "POST",
-      body: formData,
-      signal: activeAbortController.signal,
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "Processing failed");
-    }
-
-    const data = await res.json();
-    if (data.status === "cancelled") {
-      hideProcessingModal();
-      return;
-    }
-
-    advanceStep(4);
-    stepperTimers.push(setTimeout(async () => {
-      hideProcessingModal();
-      await openDashboardWithFiling(data.document_id || "all");
-    }, 600));
-  } catch (err) {
-    hideProcessingModal();
-    if (err.name !== "AbortError") {
-      alert("Ingestion error: " + err.message);
-    }
-  } finally {
-    event.target.value = "";
-  }
+  event.target.value = "";
+  const displayName = files.length === 1 ? files[0].name : `${files.length} PDF Filings`;
+  openReconcileModal({ type: "batch_upload", files }, displayName);
 }
 
-async function ingestStarterFiling(filename) {
-  showProcessingModal(filename);
-  advanceStep(1);
+function ingestStarterFiling(filename) {
+  openReconcileModal({ type: "starter", filename }, filename);
+}
 
+async function executeBatchPDFUpload(files, comparisonMode) {
+  if (!files || files.length === 0) return;
+
+  activeAbortController = new AbortController();
+  const total = files.length;
+  let lastDocId = null;
+
+  for (let idx = 0; idx < total; idx++) {
+    const file = files[idx];
+    const prefix = total > 1 ? `[${idx + 1}/${total}] ` : "";
+    showProcessingModal(`${prefix}${file.name}`);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch(api(`/api/documents?comparison_mode=${encodeURIComponent(comparisonMode)}`), {
+        method: "POST",
+        body: formData,
+        signal: activeAbortController.signal,
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || `Processing failed for ${file.name}`);
+      }
+
+      const data = await res.json();
+      if (data.status === "cancelled") {
+        hideProcessingModal();
+        return;
+      }
+
+      lastDocId = data.document_id;
+      for (let s = 1; s <= 4; s++) {
+        setStepProgress(s, 100);
+      }
+      const sub4 = document.getElementById("stepSub4");
+      if (sub4) sub4.innerText = `Saved processed/${data.document_id || 'doc'}.json`;
+
+      if (idx < total - 1) {
+        await new Promise(r => setTimeout(r, 400));
+      }
+    } catch (err) {
+      hideProcessingModal();
+      if (err.name !== "AbortError") {
+        alert(`Ingestion error on ${file.name}: ` + err.message);
+      }
+      return;
+    }
+  }
+
+  stopProgressPolling();
+  setTimeout(async () => {
+    hideProcessingModal();
+    await openDashboardWithFiling(total > 1 ? "all" : (lastDocId || "all"));
+  }, 600);
+}
+
+async function executeStarterIngest(filename, comparisonMode) {
+  showProcessingModal(filename);
   activeAbortController = new AbortController();
 
   try {
-    stepperTimers.push(setTimeout(() => advanceStep(2), 600));
-    stepperTimers.push(setTimeout(() => advanceStep(3), 1300));
-
     const res = await fetch(api("/api/ingest-starter"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename }),
+      body: JSON.stringify({ filename, comparison_mode: comparisonMode }),
       signal: activeAbortController.signal,
     });
 
@@ -466,15 +702,56 @@ async function ingestStarterFiling(filename) {
       return;
     }
 
-    advanceStep(4);
-    stepperTimers.push(setTimeout(async () => {
+    for (let s = 1; s <= 4; s++) {
+      setStepProgress(s, 100);
+    }
+    const sub4 = document.getElementById("stepSub4");
+    if (sub4) sub4.innerText = `Artifact persisted to processed/${data.document_id || ''}.json`;
+
+    stopProgressPolling();
+    setTimeout(async () => {
       hideProcessingModal();
       await openDashboardWithFiling(data.document_id || "all");
-    }, 600));
+    }, 600);
   } catch (err) {
     hideProcessingModal();
     if (err.name !== "AbortError") {
       alert("Starter ingestion error: " + err.message);
+    }
+  }
+}
+
+async function executeReconcileExisting(docId, filename, comparisonMode) {
+  showProcessingModal(filename);
+  activeAbortController = new AbortController();
+
+  try {
+    const res = await fetch(api(`/api/documents/${encodeURIComponent(docId)}/reconcile?comparison_mode=${encodeURIComponent(comparisonMode)}`), {
+      method: "POST",
+      signal: activeAbortController.signal,
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Re-reconciliation failed");
+    }
+
+    const data = await res.json();
+    for (let s = 1; s <= 4; s++) {
+      setStepProgress(s, 100);
+    }
+    const sub4 = document.getElementById("stepSub4");
+    if (sub4) sub4.innerText = `Reconciliation complete: ${data.relationships_generated || 0} relationship(s)`;
+
+    stopProgressPolling();
+    setTimeout(async () => {
+      hideProcessingModal();
+      await openDashboardWithFiling(docId);
+    }, 600);
+  } catch (err) {
+    hideProcessingModal();
+    if (err.name !== "AbortError") {
+      alert("Re-reconciliation error: " + err.message);
     }
   }
 }
@@ -498,15 +775,14 @@ function setupDragAndDrop() {
   });
 
   dropZone.addEventListener("drop", e => {
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) {
-      const file = files[0];
-      const input = document.getElementById("pdfFileInput");
-      if (input) {
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
-        input.files = dataTransfer.files;
-        handlePDFUpload({ target: input });
+    const rawFiles = e.dataTransfer.files;
+    if (rawFiles && rawFiles.length > 0) {
+      const files = Array.from(rawFiles).filter(f => f.name.toLowerCase().endsWith(".pdf"));
+      if (files.length > 0) {
+        const displayName = files.length === 1 ? files[0].name : `${files.length} PDF Filings`;
+        openReconcileModal({ type: "batch_upload", files }, displayName);
+      } else {
+        alert("Please drop valid PDF file(s).");
       }
     }
   });
@@ -556,9 +832,9 @@ function updateMetricsSummary() {
 
   allRelationships.forEach(r => {
     const t = (r.relationship_type || "").toLowerCase();
-    if (t === "corroborates") corrCount++;
-    else if (t === "contradicts") contCount++;
-    else if (t === "contextualizes") ctxCount++;
+    if (t === "corroborated" || t === "corroborates") corrCount++;
+    else if (t === "contradicted" || t === "contradicts" || t === "apparent_contradiction") contCount++;
+    else if (t === "contextualized" || t === "contextualizes") ctxCount++;
   });
 
   const reviewCount = allObservations.filter(o => o.needs_review).length;
@@ -583,7 +859,10 @@ function updateMetricsSummary() {
 // -----------------------------------------------------------------
 async function loadShowcaseCases() {
   try {
-    const res = await fetch(api("/api/showcase"));
+    const url = currentDocFilter && currentDocFilter !== "all"
+      ? api(`/api/showcase?document_id=${encodeURIComponent(currentDocFilter)}`)
+      : api("/api/showcase");
+    const res = await fetch(url);
     showcaseData = await res.json();
   } catch (e) {
     showcaseData = [];
@@ -1020,16 +1299,51 @@ function renderRelationships(items) {
     const card = document.createElement("div");
     card.className = "relationship-card";
     const badgeClass = `badge-${rel.relationship_type}`;
+    const obsA = allObservations.find(o => o.id === rel.observation_a);
+    const obsB = allObservations.find(o => o.id === rel.observation_b);
+    const evA = obsA && obsA.evidence && obsA.evidence[0];
+    const evB = obsB && obsB.evidence && obsB.evidence[0];
+    const displayType = (rel.relationship_type || "").replace("_", " ").toUpperCase();
+
+    const renderObsCol = (obs, ev, label) => {
+      if (!obs) {
+        return `
+          <div class="rel-obs-col">
+            <span class="rel-obs-heading">${label}</span>
+            <span class="rel-obs-concept" style="color: var(--text-tertiary); font-family: var(--font-mono)">${label === 'Observation A' ? rel.observation_a : rel.observation_b}</span>
+          </div>
+        `;
+      }
+      const valStr = obs.value ? (obs.value.amount !== null && obs.value.amount !== undefined ? `${obs.value.amount} ${obs.value.unit || ''}` : (obs.value.text || 'N/A')) : 'N/A';
+      const normStr = obs.value && obs.value.normalized_amount !== null && obs.value.normalized_amount !== undefined ? `(Norm: ${obs.value.normalized_amount} ${obs.value.normalized_unit || ''})` : '';
+      const periodStr = obs.time ? (obs.time.label || '') : '';
+
+      return `
+        <div class="rel-obs-col">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span class="rel-obs-heading">${label} &bull; ${obs.entity.canonical_name}</span>
+            <span style="font-size:0.68rem; font-family:var(--font-mono); color:var(--text-tertiary)">${periodStr}</span>
+          </div>
+          <span class="rel-obs-concept">${obs.concept.canonical_name}</span>
+          <span class="rel-obs-val">${valStr} <span style="font-size:0.75rem; font-weight:normal; color:var(--text-secondary)">${normStr}</span></span>
+          ${ev ? `<span class="rel-obs-cite">"${ev.quote.length > 120 ? ev.quote.substring(0, 117) + '...' : ev.quote}" <span style="font-style:normal; color:var(--accent-primary); font-family:var(--font-mono)">[p.${ev.page_number}]</span></span>` : ''}
+        </div>
+      `;
+    };
 
     card.innerHTML = `
       <div class="rel-header">
-        <span class="showcase-item-badge ${badgeClass}">${rel.relationship_type}</span>
+        <span class="showcase-item-badge ${badgeClass}">${displayType}</span>
         <span style="font-size: 0.72rem; color: var(--text-tertiary); font-family: var(--font-mono)">
           Confidence: ${(rel.confidence * 100).toFixed(0)}%
         </span>
       </div>
-      <div class="rel-title">${rel.observation_a} &bull; ${rel.observation_b}</div>
-      <div class="rel-explanation">${rel.explanation}</div>
+      <div class="rel-title">${obsA ? obsA.entity.canonical_name : 'Entity'} &bull; ${obsA ? obsA.concept.canonical_name : rel.observation_a} vs ${obsB ? obsB.concept.canonical_name : rel.observation_b}</div>
+      <div class="rel-comparison-strip">
+        ${renderObsCol(obsA, evA, 'Observation A')}
+        ${renderObsCol(obsB, evB, 'Observation B')}
+      </div>
+      <div class="rel-explanation"><strong>Cascade Verdict:</strong> ${rel.explanation}</div>
       <div style="margin-top: 0.5rem;">
         ${(rel.reasons || []).map(r => `<span class="reason-tag">${r}</span>`).join('')}
       </div>
@@ -1043,13 +1357,21 @@ function filterRelationships() {
   const searchVal = document.getElementById("relSearchInput").value.toLowerCase();
 
   const filtered = allRelationships.filter(r => {
-    const matchType = typeVal === "all" || (r.relationship_type || "").toLowerCase() === typeVal.toLowerCase();
+    const rType = (r.relationship_type || "").toLowerCase();
+    const matchType = typeVal === "all" || rType === typeVal.toLowerCase() || (typeVal === "contradicted" && rType === "apparent_contradiction");
+    const searchInObs = () => {
+      const a = allObservations.find(o => o.id === r.observation_a);
+      const b = allObservations.find(o => o.id === r.observation_b);
+      return (a && (a.entity.canonical_name.toLowerCase().includes(searchVal) || a.concept.canonical_name.toLowerCase().includes(searchVal))) ||
+             (b && (b.entity.canonical_name.toLowerCase().includes(searchVal) || b.concept.canonical_name.toLowerCase().includes(searchVal)));
+    };
     const matchSearch =
       !searchVal ||
       r.explanation.toLowerCase().includes(searchVal) ||
       (r.reasons || []).some(reason => reason.toLowerCase().includes(searchVal)) ||
       r.observation_a.toLowerCase().includes(searchVal) ||
-      r.observation_b.toLowerCase().includes(searchVal);
+      r.observation_b.toLowerCase().includes(searchVal) ||
+      searchInObs();
 
     return matchType && matchSearch;
   });
