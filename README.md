@@ -7,7 +7,7 @@
 
 ## 1. Setup and Run Instructions
 
-### 1. API Key (Optional)
+### 1. API Key (To actaully understand the system please use API key and upload your own pdfs)
 The system runs completely out of the box using built-in deterministic rule extractors and pre-extracted artifacts.
 To enable live LLM extraction for newly uploaded PDFs:
 - Get a free-tier API key from [Google AI Studio](https://aistudio.google.com/).
