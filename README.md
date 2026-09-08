@@ -7,52 +7,39 @@
 
 ## 1. Setup and Run Instructions
 
-### Prerequisites
-- **Python**: 3.10 or higher
-- **OS**: Windows, macOS, or Linux
-- **Optional API Key**: `GEMINI_API_KEY` or `OPENAI_API_KEY` in a `.env` file for live LLM extraction. (The system includes offline deterministic rule extractors and pre-extracted artifacts, so it runs fully without paid external services).
+### 1. API Key (Optional)
+The system runs completely out of the box using built-in deterministic rule extractors and pre-extracted artifacts.
+To enable live LLM extraction for newly uploaded PDFs:
+- Get a free-tier API key from [Google AI Studio](https://aistudio.google.com/).
+- Create a `.env` file in the project root:
+  ```env
+  GEMINI_API_KEY=your_google_ai_studio_api_key
+  ```
 
-### Installation
+### 2. Installation
+```bash
+git clone https://github.com/YOUR_USERNAME/financial-fact-knowledge-layer.git
+cd financial-fact-knowledge-layer
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/financial-fact-knowledge-layer.git
-   cd financial-fact-knowledge-layer
-   ```
+# Create & activate a virtual environment
+python -m venv .venv
+.venv\Scripts\Activate.ps1   # Windows (or: source .venv/bin/activate on macOS/Linux)
 
-2. **Create and activate a virtual environment**:
-   ```powershell
-   # Windows PowerShell
-   python -m venv .venv
-   .venv\Scripts\Activate.ps1
+# Install dependencies
+pip install -r requirements.txt
+```
 
-   # macOS / Linux
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
-
-3. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-### Run the Application
-
-Start the FastAPI backend server and static dashboard:
-```powershell
+### 3. Run the Application
+Start the server and launch the interactive dashboard:
+```bash
 uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Open your browser and navigate to:
+Open your browser at:
 ```
 http://127.0.0.1:8000
 ```
-
-### Run Automated Unit Tests
-To verify unit normalization, temporal math, candidate gating, and the rules-first cascade:
-```powershell
-pytest backend/tests/test_reconciliation.py backend/tests/test_sessions.py -v
-```
+The dashboard will load immediately with pre-processed filings, canonical facts, and the four showcase evaluation cases ready to explore.
 
 ---
 
@@ -159,14 +146,16 @@ Our system explicitly identifies and demonstrates all four cases required by the
 ## 4. Limitations and Next Steps
 
 ### Honest Evaluation: What Does Not Work Yet
-1. **Complex Multi-Header Embedded Tables in Scanned PDFs**: If a PDF contains complex nested tables without digital text layers (requiring OCR), standard text extraction can scramble column boundaries, causing units to detach from figures.
-2. **Cross-Currency Reconciliation Without Explicit FX**: Comparing `$1.2 Billion` against `₹9,800 Crore` currently results in `UNRESOLVED`. The engine intentionally refuses to assume an arbitrary exchange rate unless an explicit FX rate is cited in the document.
-3. **Sequential Pipeline Latency**: For massive 200+ page filings, running serial extraction calls can take 60–90 seconds on standard consumer hardware.
+1. **Complex Multi-Header Embedded Tables in Scanned PDFs**: While native digital PDFs (10-Ks, Annual Reports, Investor Presentations) parse accurately via PyMuPDF, scanned image-only PDFs containing complex nested tables require dedicated vision OCR to prevent column text interleaving.
+2. **Sequential Batch Latency on 200+ Page Documents**: For very large filings (200+ pages), running serial LLM chunk extraction can take 60–90 seconds on standard consumer hardware. Parallelizing chunk extraction via asynchronous task queues would significantly reduce latency.
+
+### Design Safety Guarantee: Cross-Currency Comparisons
+- **Strict Anti-Hallucination Policy**: When comparing claims in different currencies (e.g. `$1.2 Billion` vs. `₹9,800 Crore`), the engine intentionally assigns an **`UNRESOLVED`** relationship with the machine-readable reason `different_currency_no_fx`. Financial audit standards strictly prohibit guessing spot exchange rates without an explicit document conversion rate.
 
 ### What We Would Build Next
-1. **Vision-Language Table Parser**: Integrate Table-Transformer or Gemini-Vision specifically for financial statement balance sheets and income statement tables to retain 2D grid coordinates.
-2. **Dynamic Historical FX Rate Oracle**: Connect an audited historical FX time-series service (e.g. RBI / Federal Reserve reference rates) to reconcile currency differences across historical fiscal dates.
-3. **Vector Embedding Pre-Filter**: Supplement the concept alias dictionary with dense semantic embeddings (e.g. `text-embedding-3-small`) to discover non-obvious conceptual synergies without manual dictionary expansion.
+1. **Vision-Language Table Parser**: Integrate Table-Transformer or Gemini-Vision specifically for complex financial statement balance sheets and income statement grids to retain 2D cell coordinates.
+2. **Dynamic Historical FX Rate Oracle**: Connect an audited historical FX time-series service (e.g. RBI / Federal Reserve reference rates) to reconcile currency differences across historical fiscal dates automatically.
+3. **Vector Embedding Pre-Filter**: Supplement the concept alias dictionary with dense semantic embeddings to discover non-obvious conceptual synergies without manual dictionary expansion.
 
 ---
 
