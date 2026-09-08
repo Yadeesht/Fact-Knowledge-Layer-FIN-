@@ -123,7 +123,11 @@ def extract_observations_from_batch(
         if target_sec and not item.get("section"):
             item["section"] = target_sec
 
-        candidate = ExtractedObservation(**item)
+        try:
+            candidate = ExtractedObservation(**item)
+        except Exception as e:
+            print(f"[Extractor] Warning: Skipping malformed candidate in batch {batch.batch_id}: {e}")
+            continue
 
         # ── Grounding validation gate ──
         grounding_passed, grounding_reasons = validate_grounding(candidate)

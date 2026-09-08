@@ -1,7 +1,7 @@
 from datetime import date
 from enum import Enum
 from typing import Optional, Union, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # -------------------------
@@ -23,6 +23,7 @@ class PeriodType(str, Enum):
     HALF_YEAR = "half_year"
     FISCAL_YEAR = "fiscal_year"
     CUSTOM = "custom"
+    UNKNOWN = "unknown"
 
 
 class AssertionStatus(str, Enum):
@@ -78,6 +79,34 @@ class TimeContext(BaseModel):
     # Preserve original expression from document
     # e.g. "H1 FY25", "FY2024", "as of December 31, 2021"
     label: Optional[str] = None
+
+    @field_validator("period_type", mode="before")
+    @classmethod
+    def coerce_period_type(cls, v: Any) -> PeriodType:
+        if v is None:
+            return PeriodType.CUSTOM
+        if isinstance(v, PeriodType):
+            return v
+        s = str(v).lower().strip().replace("-", "_").replace(" ", "_")
+        MAPPING = {
+            "instant": PeriodType.INSTANT,
+            "point_in_time": PeriodType.INSTANT,
+            "as_of": PeriodType.INSTANT,
+            "month": PeriodType.MONTH,
+            "monthly": PeriodType.MONTH,
+            "quarter": PeriodType.QUARTER,
+            "quarterly": PeriodType.QUARTER,
+            "half_year": PeriodType.HALF_YEAR,
+            "half_yearly": PeriodType.HALF_YEAR,
+            "semi_annual": PeriodType.HALF_YEAR,
+            "fiscal_year": PeriodType.FISCAL_YEAR,
+            "annual": PeriodType.FISCAL_YEAR,
+            "yearly": PeriodType.FISCAL_YEAR,
+            "year": PeriodType.FISCAL_YEAR,
+            "custom": PeriodType.CUSTOM,
+            "unknown": PeriodType.UNKNOWN,
+        }
+        return MAPPING.get(s, PeriodType.CUSTOM)
 
 
 # -------------------------
@@ -262,6 +291,71 @@ class ExtractedObservation(BaseModel):
     chunk_id: Optional[str] = None
 
     confidence: float = 0.95
+
+    @field_validator("period_type", mode="before")
+    @classmethod
+    def coerce_period_type(cls, v: Any) -> Optional[PeriodType]:
+        if v is None:
+            return PeriodType.CUSTOM
+        if isinstance(v, PeriodType):
+            return v
+        s = str(v).lower().strip().replace("-", "_").replace(" ", "_")
+        MAPPING = {
+            "instant": PeriodType.INSTANT,
+            "point_in_time": PeriodType.INSTANT,
+            "as_of": PeriodType.INSTANT,
+            "month": PeriodType.MONTH,
+            "monthly": PeriodType.MONTH,
+            "quarter": PeriodType.QUARTER,
+            "quarterly": PeriodType.QUARTER,
+            "half_year": PeriodType.HALF_YEAR,
+            "half_yearly": PeriodType.HALF_YEAR,
+            "semi_annual": PeriodType.HALF_YEAR,
+            "fiscal_year": PeriodType.FISCAL_YEAR,
+            "annual": PeriodType.FISCAL_YEAR,
+            "yearly": PeriodType.FISCAL_YEAR,
+            "year": PeriodType.FISCAL_YEAR,
+            "custom": PeriodType.CUSTOM,
+            "unknown": PeriodType.UNKNOWN,
+        }
+        return MAPPING.get(s, PeriodType.CUSTOM)
+
+    @field_validator("value_type", mode="before")
+    @classmethod
+    def coerce_value_type(cls, v: Any) -> ValueType:
+        if isinstance(v, ValueType):
+            return v
+        s = str(v).lower().strip()
+        if s in ("number", "numeric", "float", "int", "integer", "amount", "ratio"):
+            return ValueType.NUMBER
+        if s in ("percentage", "percent", "%", "pct"):
+            return ValueType.PERCENTAGE
+        if s in ("currency", "money", "monetary", "inr", "usd"):
+            return ValueType.CURRENCY
+        if s in ("boolean", "bool"):
+            return ValueType.BOOLEAN
+        return ValueType.TEXT
+
+    @field_validator("assertion_status", mode="before")
+    @classmethod
+    def coerce_assertion_status(cls, v: Any) -> AssertionStatus:
+        if isinstance(v, AssertionStatus):
+            return v
+        s = str(v).lower().strip()
+        MAPPING = {
+            "actual": AssertionStatus.ACTUAL,
+            "estimate": AssertionStatus.ESTIMATE,
+            "estimated": AssertionStatus.ESTIMATE,
+            "forecast": AssertionStatus.FORECAST,
+            "forecasted": AssertionStatus.FORECAST,
+            "projected": AssertionStatus.PROJECTED,
+            "projection": AssertionStatus.PROJECTED,
+            "target": AssertionStatus.TARGET,
+            "targeted": AssertionStatus.TARGET,
+            "restated": AssertionStatus.RESTATED,
+            "unknown": AssertionStatus.UNKNOWN,
+        }
+        return MAPPING.get(s, AssertionStatus.UNKNOWN)
 
 
 # -------------------------

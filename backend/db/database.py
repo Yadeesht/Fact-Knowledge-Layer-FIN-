@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS documents (
     dataset TEXT NOT NULL,
     document_type TEXT,
     page_count INTEGER,
+    file_hash TEXT UNIQUE,
+    file_size INTEGER,
     created_at TEXT NOT NULL
 );
 
@@ -44,6 +46,8 @@ CREATE TABLE IF NOT EXISTS concepts (
 
 CREATE TABLE IF NOT EXISTS observations (
     id TEXT PRIMARY KEY,
+    document_id TEXT,
+    session_id TEXT,
     entity_id TEXT NOT NULL,
     concept_id TEXT NOT NULL,
     value_type TEXT NOT NULL,
@@ -63,6 +67,7 @@ CREATE TABLE IF NOT EXISTS observations (
     confidence REAL,
     needs_review INTEGER DEFAULT 0,
     review_reason TEXT,
+    FOREIGN KEY(document_id) REFERENCES documents(id),
     FOREIGN KEY(entity_id) REFERENCES entities(id),
     FOREIGN KEY(concept_id) REFERENCES concepts(id)
 );
@@ -83,6 +88,7 @@ CREATE TABLE IF NOT EXISTS evidence (
 
 CREATE TABLE IF NOT EXISTS relationships (
     id TEXT PRIMARY KEY,
+    session_id TEXT,
     observation_a TEXT NOT NULL,
     observation_b TEXT NOT NULL,
     relationship_type TEXT NOT NULL,
@@ -93,6 +99,17 @@ CREATE TABLE IF NOT EXISTS relationships (
     numeric_json TEXT,
     FOREIGN KEY(observation_a) REFERENCES observations(id),
     FOREIGN KEY(observation_b) REFERENCES observations(id)
+);
+
+CREATE TABLE IF NOT EXISTS analysis_sessions (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    document_ids_json TEXT NOT NULL,
+    comparison_mode TEXT NOT NULL,
+    baseline_doc_ids_json TEXT,
+    created_at TEXT NOT NULL,
+    status TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS processing_runs (
@@ -122,6 +139,15 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
 
         # Migrations for existing DB instances if columns are missing
         cursor = conn.cursor()
+
+        # Documents file_hash and file_size
+        cursor.execute("PRAGMA table_info(documents)")
+        columns = [row["name"] for row in cursor.fetchall()]
+        if "file_hash" not in columns:
+            cursor.execute("ALTER TABLE documents ADD COLUMN file_hash TEXT")
+        if "file_size" not in columns:
+            cursor.execute("ALTER TABLE documents ADD COLUMN file_size INTEGER")
+
         # Chunks chunk_type
         cursor.execute("PRAGMA table_info(chunks)")
         columns = [row["name"] for row in cursor.fetchall()]
@@ -144,9 +170,19 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
         if "embedding_json" not in columns:
             cursor.execute("ALTER TABLE concepts ADD COLUMN embedding_json TEXT")
 
-        # Relationships comparability_json and numeric_json
+        # Observations document_id and session_id
+        cursor.execute("PRAGMA table_info(observations)")
+        columns = [row["name"] for row in cursor.fetchall()]
+        if "document_id" not in columns:
+            cursor.execute("ALTER TABLE observations ADD COLUMN document_id TEXT")
+        if "session_id" not in columns:
+            cursor.execute("ALTER TABLE observations ADD COLUMN session_id TEXT")
+
+        # Relationships session_id, comparability_json and numeric_json
         cursor.execute("PRAGMA table_info(relationships)")
         columns = [row["name"] for row in cursor.fetchall()]
+        if "session_id" not in columns:
+            cursor.execute("ALTER TABLE relationships ADD COLUMN session_id TEXT")
         if "comparability_json" not in columns:
             cursor.execute("ALTER TABLE relationships ADD COLUMN comparability_json TEXT")
         if "numeric_json" not in columns:

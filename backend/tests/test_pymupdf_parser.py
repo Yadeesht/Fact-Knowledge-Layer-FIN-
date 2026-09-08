@@ -24,10 +24,14 @@ if str(ROOT_DIR) not in sys.path:
 from backend.ingestion.pdf_parser import PyMuPDFParser, HAS_PYMUPDF
 
 try:
-    import fitz
-    PYMUPDF_VERSION = fitz.__version__
+    import pymupdf
+    PYMUPDF_VERSION = pymupdf.__version__
 except Exception:
-    PYMUPDF_VERSION = "Unavailable"
+    try:
+        import fitz as pymupdf
+        PYMUPDF_VERSION = pymupdf.__version__
+    except Exception:
+        PYMUPDF_VERSION = "Unavailable"
 
 TEMP_DATA_DIR = ROOT_DIR / "temp_data"
 

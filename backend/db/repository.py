@@ -53,6 +53,7 @@ class Repository:
             self.conn.execute("DELETE FROM chunks")
             self.conn.execute("DELETE FROM processing_runs")
             self.conn.execute("DELETE FROM documents")
+            self.conn.execute("DELETE FROM analysis_sessions")
 
 
     # -----------------------------
@@ -65,16 +66,25 @@ class Repository:
         dataset: str = "custom",
         document_type: str = "pdf",
         page_count: int = 0,
+        file_hash: Optional[str] = None,
+        file_size: Optional[int] = None,
     ):
         now = datetime.utcnow().isoformat()
         with self.conn:
             self.conn.execute(
                 """
-                INSERT OR REPLACE INTO documents (id, filename, dataset, document_type, page_count, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO documents (id, filename, dataset, document_type, page_count, file_hash, file_size, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (doc_id, filename, dataset, document_type, page_count, now),
+                (doc_id, filename, dataset, document_type, page_count, file_hash, file_size, now),
             )
+
+    def get_document_by_hash(self, file_hash: str) -> Optional[Dict[str, Any]]:
+        cursor = self.conn.execute("SELECT * FROM documents WHERE file_hash = ?", (file_hash,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return self.get_document_detail(row["id"])
 
     def rollback_document(self, doc_id: str):
         """
@@ -283,7 +293,14 @@ class Repository:
     # -----------------------------
     # Observation operations
     # -----------------------------
-    def save_observation(self, obs: Observation, dataset: str = "general") -> None:
+    def save_observation(
+        self,
+        obs: Observation,
+        dataset: str = "general",
+        document_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> None:
+        doc_id = document_id or (obs.evidence[0].document_id if obs.evidence else None)
         entity_id = self.get_or_create_entity(obs.entity.canonical_name, obs.entity.entity_type, obs.entity.aliases)
         concept_id = self.get_or_create_concept(obs.concept.canonical_name, obs.concept.definition)
 
@@ -291,15 +308,17 @@ class Repository:
             self.conn.execute(
                 """
                 INSERT OR REPLACE INTO observations (
-                    id, entity_id, concept_id, value_type, value, unit,
+                    id, document_id, session_id, entity_id, concept_id, value_type, value, unit,
                     normalized_value, normalized_unit, text_value,
                     period_type, period_start, period_end, period_label,
                     geography, scope_level, consolidation,
                     assertion_status, confidence, needs_review, review_reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     obs.id,
+                    doc_id,
+                    session_id,
                     entity_id,
                     concept_id,
                     obs.value.type.value,
@@ -410,6 +429,8 @@ class Repository:
         entity_name: Optional[str] = None,
         concept_name: Optional[str] = None,
         needs_review: Optional[bool] = None,
+        document_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> List[Observation]:
         query = """
             SELECT o.*, e.canonical_name as entity_name, e.entity_type, e.aliases_json as entity_aliases,
@@ -429,7 +450,14 @@ class Repository:
         if needs_review is not None:
             query += " AND o.needs_review = ?"
             params.append(1 if needs_review else 0)
+        if document_id:
+            query += " AND (o.document_id = ? OR o.id IN (SELECT observation_id FROM evidence WHERE document_id = ?))"
+            params.extend([document_id, document_id])
+        if session_id:
+            query += " AND o.session_id = ?"
+            params.append(session_id)
 
+        query += " ORDER BY o.id"
         cursor = self.conn.execute(query, params)
         obs_rows = cursor.fetchall()
 
@@ -486,6 +514,88 @@ class Repository:
             )
         return results
 
+    def get_comparison_candidates(
+        self,
+        current_doc_id: str,
+        comparison_mode: str = "cross_document",
+        target_doc_ids: Optional[List[str]] = None,
+    ) -> List[Observation]:
+        """
+        Returns scoped candidate observations for reconciliation.
+        - 'cross_document': observations from other documents, strictly excluding the current document.
+        - If target_doc_ids is provided, limits candidates strictly to those document IDs.
+        - Excludes quarantined/needs_review observations.
+        """
+        query = """
+            SELECT o.*, e.canonical_name as entity_name, e.entity_type, e.aliases_json as entity_aliases,
+                   c.canonical_name as concept_name, c.description as concept_desc
+            FROM observations o
+            JOIN entities e ON o.entity_id = e.id
+            JOIN concepts c ON o.concept_id = c.id
+            WHERE o.needs_review = 0
+        """
+        params = []
+        if comparison_mode == "cross_document":
+            query += " AND (o.document_id != ? OR (o.document_id IS NULL AND o.id NOT IN (SELECT observation_id FROM evidence WHERE document_id = ?)))"
+            params.extend([current_doc_id, current_doc_id])
+
+        if target_doc_ids:
+            placeholders = ",".join("?" for _ in target_doc_ids)
+            query += f" AND (o.document_id IN ({placeholders}) OR o.id IN (SELECT observation_id FROM evidence WHERE document_id IN ({placeholders})))"
+            params.extend(target_doc_ids + target_doc_ids)
+
+        query += " ORDER BY o.id"
+        cursor = self.conn.execute(query, params)
+        obs_rows = cursor.fetchall()
+
+        results = []
+        for row in obs_rows:
+            ev_cursor = self.conn.execute(
+                "SELECT * FROM evidence WHERE observation_id = ?", (row["id"],)
+            )
+            evidence_list = [
+                Evidence(
+                    document_id=erow["document_id"],
+                    page_number=erow["page_number"],
+                    section=erow["section"],
+                    chunk_id=erow["chunk_id"],
+                    quote=erow["quote"],
+                    locator=json.loads(erow["locator_json"]) if erow["locator_json"] else None,
+                )
+                for erow in ev_cursor.fetchall()
+            ]
+            aliases = json.loads(row["entity_aliases"]) if row["entity_aliases"] else []
+            results.append(
+                Observation(
+                    id=row["id"],
+                    entity=Entity(canonical_name=row["entity_name"], entity_type=row["entity_type"], aliases=aliases),
+                    concept=Concept(canonical_name=row["concept_name"], definition=row["concept_desc"]),
+                    value=FactValue(
+                        type=ValueType(row["value_type"]),
+                        amount=row["value"],
+                        unit=row["unit"],
+                        normalized_amount=row["normalized_value"],
+                        normalized_unit=row["normalized_unit"],
+                        text=row["text_value"],
+                    ),
+                    time=TimeContext(
+                        period_type=PeriodType(row["period_type"]),
+                        label=row["period_label"],
+                    ),
+                    scope=Scope(
+                        geography=row["geography"],
+                        level=row["scope_level"],
+                        consolidation=row["consolidation"],
+                    ),
+                    assertion_status=AssertionStatus(row["assertion_status"]),
+                    confidence=row["confidence"],
+                    needs_review=bool(row["needs_review"]),
+                    review_reason=row["review_reason"],
+                    evidence=evidence_list,
+                )
+            )
+        return results
+
     # -----------------------------
     # Evidence detail operations
     # -----------------------------
@@ -501,19 +611,20 @@ class Repository:
     # -----------------------------
     # Relationship operations
     # -----------------------------
-    def save_relationship(self, rel: Relationship) -> None:
+    def save_relationship(self, rel: Relationship, session_id: Optional[str] = None) -> None:
         comp_json = json.dumps(rel.comparability.model_dump()) if rel.comparability else None
         num_json = json.dumps(rel.numeric.model_dump()) if rel.numeric else None
         with self.conn:
             self.conn.execute(
                 """
                 INSERT OR REPLACE INTO relationships (
-                    id, observation_a, observation_b, relationship_type,
+                    id, session_id, observation_a, observation_b, relationship_type,
                     confidence, explanation, reasons_json, comparability_json, numeric_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     rel.id,
+                    session_id,
                     rel.observation_a,
                     rel.observation_b,
                     rel.relationship_type.value,
@@ -526,13 +637,18 @@ class Repository:
             )
 
     def list_relationships(
-        self, rel_type: Optional[RelationshipType] = None
+        self,
+        rel_type: Optional[RelationshipType] = None,
+        session_id: Optional[str] = None,
     ) -> List[Relationship]:
         query = "SELECT * FROM relationships WHERE 1=1"
         params = []
         if rel_type:
             query += " AND relationship_type = ?"
             params.append(rel_type.value)
+        if session_id:
+            query += " AND session_id = ?"
+            params.append(session_id)
 
         cursor = self.conn.execute(query, params)
         rows = cursor.fetchall()
@@ -704,3 +820,64 @@ class Repository:
             item["metrics"] = json.loads(item["metrics_json"]) if item["metrics_json"] else {}
             runs.append(item)
         return runs
+
+    # -----------------------------
+    # Analysis Sessions
+    # -----------------------------
+    def create_session(
+        self,
+        session_id: str,
+        name: str,
+        document_ids: List[str],
+        comparison_mode: str = "cross_document",
+        baseline_doc_ids: Optional[List[str]] = None,
+        description: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        now = datetime.utcnow().isoformat()
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT OR REPLACE INTO analysis_sessions (
+                    id, name, description, document_ids_json, comparison_mode,
+                    baseline_doc_ids_json, created_at, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    name,
+                    description,
+                    json.dumps(document_ids),
+                    comparison_mode,
+                    json.dumps(baseline_doc_ids or []),
+                    now,
+                    "active",
+                ),
+            )
+        return self.get_session(session_id)
+
+    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        cursor = self.conn.execute("SELECT * FROM analysis_sessions WHERE id = ?", (session_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        sess = dict(row)
+        sess["document_ids"] = json.loads(sess["document_ids_json"]) if sess["document_ids_json"] else []
+        sess["baseline_doc_ids"] = json.loads(sess["baseline_doc_ids_json"]) if sess["baseline_doc_ids_json"] else []
+        return sess
+
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        cursor = self.conn.execute("SELECT * FROM analysis_sessions ORDER BY created_at DESC")
+        sessions = []
+        for r in cursor.fetchall():
+            s = dict(r)
+            s["document_ids"] = json.loads(s["document_ids_json"]) if s["document_ids_json"] else []
+            s["baseline_doc_ids"] = json.loads(s["baseline_doc_ids_json"]) if s["baseline_doc_ids_json"] else []
+            sessions.append(s)
+        return sessions
+
+    def update_session_status(self, session_id: str, status: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE analysis_sessions SET status = ? WHERE id = ?",
+                (status, session_id),
+            )

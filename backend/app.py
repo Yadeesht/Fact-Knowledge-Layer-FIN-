@@ -1,5 +1,6 @@
 import os
 import shutil
+import uuid
 import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -93,9 +94,14 @@ def get_app_config():
 # -------------------------------------------------------------
 @app.post("/documents")
 @app.post("/api/documents")
-def upload_document(file: UploadFile = File(...)):
+def upload_document(
+    file: UploadFile = File(...),
+    comparison_mode: str = Query("cross_document"),
+    target_doc_ids: Optional[str] = Query(None),
+    session_id: Optional[str] = Query(None),
+):
     """
-    POST /documents (§11): Upload a PDF, triggers synchronous ingestion in worker thread.
+    POST /documents (§11): Upload a PDF, triggers synchronous ingestion with content-hash cache and scoped reconciliation.
     """
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
@@ -104,9 +110,18 @@ def upload_document(file: UploadFile = File(...)):
     with open(saved_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
+    targets = [t.strip() for t in target_doc_ids.split(",") if t.strip()] if target_doc_ids else None
+
     repo = Repository()
     try:
-        result = process_pdf_document(pdf_path=saved_path, filename=file.filename, repo=repo)
+        result = process_pdf_document(
+            pdf_path=saved_path,
+            filename=file.filename,
+            comparison_mode=comparison_mode,
+            target_doc_ids=targets,
+            session_id=session_id,
+            repo=repo,
+        )
         return result
     except InterruptedError:
         return {"status": "cancelled", "message": "Document processing was cancelled by user."}
@@ -117,8 +132,18 @@ def upload_document(file: UploadFile = File(...)):
 
 
 class StarterIngestRequest(BaseModel):
-
     filename: str
+    comparison_mode: str = "cross_document"
+    target_doc_ids: Optional[List[str]] = None
+    session_id: Optional[str] = None
+
+
+class CreateSessionRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    document_ids: List[str] = []
+    comparison_mode: str = "cross_document"
+    baseline_doc_ids: Optional[List[str]] = None
 
 
 @app.get("/api/starter-files")
@@ -159,12 +184,66 @@ def ingest_starter_file(req: StarterIngestRequest):
     dataset = "delhivery" if "delhivery" in str(target_path).lower() else "india-macroeconomy"
     repo = Repository()
     try:
-        result = process_pdf_document(pdf_path=target_path, filename=req.filename, dataset=dataset, repo=repo)
+        result = process_pdf_document(
+            pdf_path=target_path,
+            filename=req.filename,
+            dataset=dataset,
+            comparison_mode=req.comparison_mode,
+            target_doc_ids=req.target_doc_ids,
+            session_id=req.session_id,
+            repo=repo,
+        )
         return result
     except InterruptedError:
         return {"status": "cancelled", "message": "Document processing was cancelled by user."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+    finally:
+        repo.close()
+
+
+# -------------------------------------------------------------
+# Analysis Sessions API
+# -------------------------------------------------------------
+@app.get("/api/sessions")
+def list_sessions_endpoint():
+    repo = Repository()
+    try:
+        return repo.list_sessions()
+    finally:
+        repo.close()
+
+
+@app.post("/api/sessions")
+def create_session_endpoint(req: CreateSessionRequest):
+    repo = Repository()
+    try:
+        sess_id = f"sess_{uuid.uuid4().hex[:8]}"
+        sess = repo.create_session(
+            session_id=sess_id,
+            name=req.name,
+            document_ids=req.document_ids,
+            comparison_mode=req.comparison_mode,
+            baseline_doc_ids=req.baseline_doc_ids,
+            description=req.description,
+        )
+        return sess
+    finally:
+        repo.close()
+
+
+@app.get("/api/sessions/{session_id}")
+def get_session_endpoint(session_id: str):
+    repo = Repository()
+    try:
+        sess = repo.get_session(session_id)
+        if not sess:
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found.")
+        obs = repo.list_observations(session_id=session_id)
+        rels = repo.list_relationships(session_id=session_id)
+        sess["observations"] = [o.dict() for o in obs]
+        sess["relationships"] = [r.dict() for r in rels]
+        return sess
     finally:
         repo.close()
 

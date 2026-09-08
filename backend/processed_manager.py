@@ -62,6 +62,8 @@ def load_all_processed_into_db(repo: Repository) -> int:
                     dataset=doc.get("dataset", "processed"),
                     document_type=doc.get("document_type", "pdf"),
                     page_count=doc.get("page_count", 0),
+                    file_hash=doc.get("file_hash"),
+                    file_size=doc.get("file_size"),
                 )
 
             for chk in data.get("chunks", []):
@@ -76,11 +78,16 @@ def load_all_processed_into_db(repo: Repository) -> int:
 
             for obs_dict in data.get("observations", []):
                 obs = Observation(**obs_dict)
-                repo.save_observation(obs, dataset=doc.get("dataset", "processed"))
+                repo.save_observation(
+                    obs,
+                    dataset=doc.get("dataset", "processed"),
+                    document_id=doc.get("id"),
+                    session_id=obs_dict.get("session_id"),
+                )
 
             for rel_dict in data.get("relationships", []):
                 rel = Relationship(**rel_dict)
-                repo.save_relationship(rel)
+                repo.save_relationship(rel, session_id=rel_dict.get("session_id"))
 
             loaded_count += 1
         except Exception as e:

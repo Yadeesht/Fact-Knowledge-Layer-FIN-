@@ -3,14 +3,17 @@ import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-import fitz  # PyMuPDF exclusively
+try:
+    import pymupdf
+except ImportError:
+    import fitz as pymupdf
 
 HAS_PYMUPDF = True
 
 
 class PyMuPDFParser:
     """
-    Structure-aware, evidence-preserving PDF parser and chunker using PyMuPDF (fitz) exclusively.
+    Structure-aware, evidence-preserving PDF parser and chunker using PyMuPDF exclusively.
     Follows deterministic rules:
     - Rule 1: Never mix pages (chunks strictly reside on a single page)
     - Rule 2: Never separate a detected table chunk
@@ -24,13 +27,13 @@ class PyMuPDFParser:
     def extract_pages(self, pdf_path: Path) -> List[Dict[str, Any]]:
         """
         Extracts text and table layout from PDF by page, preserving page numbers (1-indexed)
-        using PyMuPDF (fitz) exclusively.
+        using PyMuPDF exclusively.
         """
         pages = []
         if not pdf_path.exists():
             raise FileNotFoundError(f"PDF not found at {pdf_path}")
 
-        doc = fitz.open(str(pdf_path))
+        doc = pymupdf.open(str(pdf_path))
         for page_idx in range(len(doc)):
             page = doc[page_idx]
             text = page.get_text("text") or ""

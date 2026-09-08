@@ -169,12 +169,20 @@ def reconcile_deterministically(
     # Rule 1: APPARENT_CONTRADICTION (Sibling / Sub-Component Metrics)
     # -------------------------------------------------------------
     if is_sibling:
+        # Sibling metrics must share entity, period, geography, and unit to be comparable
+        if (
+            comparability.period_match != "match"
+            or comparability.scope_match == "different_geography"
+            or comparability.unit_match == "incompatible"
+        ):
+            return None
+
         val_a_str = f"{a.value.amount} {a.value.unit or ''}".strip()
         val_b_str = f"{b.value.amount} {b.value.unit or ''}".strip()
         explanation = (
             f"The reported figures differ ({val_a_str} vs {val_b_str}), but this is an apparent contradiction: "
             f"they measure distinct metrics ('{a.concept.canonical_name}' vs '{b.concept.canonical_name}') "
-            f"under the same reporting entity ('{a.entity.canonical_name}'). "
+            f"under the same reporting entity ('{a.entity.canonical_name}') for '{a.time.label or 'same period'}'. "
             f"Differences reflect differing measurement scope or sub-component granularity rather than a conflict."
         )
         return Relationship(
@@ -190,47 +198,14 @@ def reconcile_deterministically(
         )
 
     # -------------------------------------------------------------
-    # Rule 2: NOT_COMPARABLE (Time Aggregation or Distinct Years)
+    # Rule 2: Hard Discard for Non-Comparable Dimensions (Return None)
     # -------------------------------------------------------------
-    if comparability.period_match == "different_aggregation":
-        label_a = a.time.label or a.time.period_type.value
-        label_b = b.time.label or b.time.period_type.value
-        explanation = (
-            f"Both observations describe '{a.entity.canonical_name}' - '{a.concept.canonical_name}', "
-            f"but are not comparable due to differing temporal aggregation ('{label_a}' vs '{label_b}': "
-            f"quarterly or interim observation versus full-year observation)."
-        )
-        return Relationship(
-            id=rel_id,
-            observation_a=a.id,
-            observation_b=b.id,
-            relationship_type=RelationshipType.NOT_COMPARABLE,
-            confidence=0.98,
-            explanation=explanation,
-            reasons=["same_entity", "same_concept", "different_time_aggregation"],
-            comparability=comparability,
-            numeric=numeric,
-        )
-
-    if comparability.period_match == "different_period":
-        label_a = a.time.label or "Period A"
-        label_b = b.time.label or "Period B"
-        explanation = (
-            f"Both observations describe '{a.entity.canonical_name}' - '{a.concept.canonical_name}', "
-            f"but refer to distinct, non-overlapping reporting timeframes ('{label_a}' vs '{label_b}'). "
-            f"They represent different periods and are not directly comparable."
-        )
-        return Relationship(
-            id=rel_id,
-            observation_a=a.id,
-            observation_b=b.id,
-            relationship_type=RelationshipType.NOT_COMPARABLE,
-            confidence=0.98,
-            explanation=explanation,
-            reasons=["same_entity", "same_concept", "different_period"],
-            comparability=comparability,
-            numeric=numeric,
-        )
+    if (
+        comparability.period_match in ("different_period", "different_aggregation")
+        or comparability.scope_match == "different_geography"
+        or comparability.unit_match == "incompatible"
+    ):
+        return None
 
     # -------------------------------------------------------------
     # Rule 3: CONTEXTUALIZED (Nested Timeframe or Scope Mismatch)

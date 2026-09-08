@@ -311,7 +311,7 @@ def test_apparent_contradiction_traded_goods_vs_revenue():
     assert rel.relationship_type == RelationshipType.APPARENT_CONTRADICTION
 
 
-def test_not_comparable_quarterly_vs_annual():
+def test_not_comparable_quarterly_vs_annual_is_discarded():
     obs_q1 = Observation(
         id="obs_q1",
         entity=Entity(canonical_name="India"),
@@ -329,14 +329,12 @@ def test_not_comparable_quarterly_vs_annual():
         assertion_status=AssertionStatus.ACTUAL,
     )
 
+    # Non-comparable time aggregations must be discarded (None) rather than stored as graph edges
     rel = reconcile_deterministically(obs_q1, obs_fy)
-    assert rel is not None
-    assert rel.relationship_type == RelationshipType.NOT_COMPARABLE
-    assert rel.comparability.period_match == "different_aggregation"
-    assert "different_time_aggregation" in rel.reasons
+    assert rel is None
 
 
-def test_not_comparable_different_years():
+def test_not_comparable_different_years_is_discarded():
     obs_fy24 = Observation(
         id="obs_fy24",
         entity=Entity(canonical_name="India"),
@@ -354,11 +352,9 @@ def test_not_comparable_different_years():
         assertion_status=AssertionStatus.ACTUAL,
     )
 
+    # Distinct fiscal years must be discarded (None) rather than stored as graph edges
     rel = reconcile_deterministically(obs_fy24, obs_fy25)
-    assert rel is not None
-    assert rel.relationship_type == RelationshipType.NOT_COMPARABLE
-    assert rel.comparability.period_match == "different_period"
-    assert "different_period" in rel.reasons
+    assert rel is None
 
 
 def test_contextualized_scope_mismatch():
@@ -454,8 +450,8 @@ if __name__ == "__main__":
     test_repository_grouped_facts_and_search()
     test_apparent_contradiction_services_vs_gdp()
     test_apparent_contradiction_traded_goods_vs_revenue()
-    test_not_comparable_quarterly_vs_annual()
-    test_not_comparable_different_years()
+    test_not_comparable_quarterly_vs_annual_is_discarded()
+    test_not_comparable_different_years_is_discarded()
     test_contextualized_scope_mismatch()
     test_structured_comparability_and_numeric_diff_saved()
     print("All unit tests passed successfully!")
